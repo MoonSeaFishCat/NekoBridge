@@ -1,0 +1,41 @@
+auth:
+    username: admin
+    password: admin123
+    sessiontimeout: 86400
+    jwtsecret: KKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKK
+logging:
+    level: info
+    maxlogentries: 1000
+    enablefilelogging: false
+    enablelogtofile: false
+    logfilepath: ./logs/webhook.log
+secrets: {}
+security:
+    enablesignaturevalidation: true
+    defaultallownewconnections: true
+    maxconnectionspersecret: 5
+    requiremanualkeymanagement: false
+server:
+    port: "3000"
+    host: 0.0.0.0
+    mode: info
+    cors:
+        origins:
+            - '*'
+ui:
+    enablewebconsole: true
+    theme: auto
+    primarycolor: '#165DFF'
+    compactmode: false
+    language: zh-CN
+    showbreadcrumb: true
+    showfooter: true
+    enableanimation: true
+websocket:
+    enableheartbeat: false
+    heartbeatinterval: 30000
+    heartbeattimeout: 5000
+    clientheartbeatinterval: 25000
+    maxmessagesize: 0
+    readtimeout: 0
+    writetimeout: 0
