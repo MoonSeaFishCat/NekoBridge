@@ -43,7 +43,7 @@ export const useWebSocket = (options: UseWebSocketOptions): UseWebSocketReturn =
   const [lastMessage, setLastMessage] = useState<WebSocketMessage | null>(null);
   
   const wsRef = useRef<WebSocket | null>(null);
-  const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const reconnectTimeoutRef = useRef<number | null>(null);
   const reconnectAttemptsRef = useRef(0);
   const isManualDisconnectRef = useRef(false);
 
