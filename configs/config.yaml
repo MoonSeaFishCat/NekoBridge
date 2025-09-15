@@ -2,7 +2,7 @@ auth:
     username: admin
     password: admin123
     sessiontimeout: 86400
-    jwtsecret: EEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEE
+    jwtsecret: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
 logging:
     level: info
     maxlogentries: 1000

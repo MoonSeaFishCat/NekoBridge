@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"strconv"
@@ -856,46 +857,27 @@ func (h *Handlers) GetWebConsoleStatus(c *gin.Context) {
 
 // WebConsoleHandler Web控制台处理器
 func (h *Handlers) WebConsoleHandler(c *gin.Context) {
-	// 检查 web/dist/index.html 是否存在
-	if _, err := os.Stat("./web/dist/index.html"); os.IsNotExist(err) {
-		// 如果文件不存在，返回简单的欢迎页面
+	// 首先检查是否启用了 Web 控制台
+	if !h.config.UI.EnableWebConsole {
 		c.Header("Content-Type", "text/html; charset=utf-8")
 		c.String(http.StatusOK, `
 <!DOCTYPE html>
 <html>
 <head>
-    <title>QQ Webhook Pro</title>
+    <title>QQ Webhook Pro - 控制台已禁用</title>
     <meta charset="utf-8">
     <style>
         body { font-family: Arial, sans-serif; text-align: center; padding: 50px; background: #f5f5f5; }
         .container { max-width: 600px; margin: 0 auto; background: white; padding: 40px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
-        h1 { color: #165DFF; margin-bottom: 20px; }
-        .status { padding: 20px; margin: 20px 0; border-radius: 5px; }
-        .running { background: #e6f7ff; color: #1890ff; border: 1px solid #91d5ff; }
-        .info { background: #f6ffed; color: #52c41a; border: 1px solid #b7eb8f; }
-        .api-info { text-align: left; margin: 20px 0; }
-        .api-info pre { background: #f5f5f5; padding: 10px; border-radius: 5px; overflow-x: auto; }
+        h1 { color: #ff4d4f; margin-bottom: 20px; }
+        .disabled { background: #fff2f0; color: #ff4d4f; border: 1px solid #ffccc7; padding: 20px; border-radius: 5px; }
     </style>
 </head>
 <body>
     <div class="container">
-        <h1>🐱 NekoBridge - QQ Webhook Pro</h1>
-        <div class="status running">
-            ✅ 服务器运行正常
-        </div>
-        <div class="info">
-            🎉 欢迎使用 QQ Webhook Pro 服务！
-        </div>
-        <div class="api-info">
-            <h3>📋 API 端点信息</h3>
-            <p><strong>健康检查:</strong></p>
-            <pre>GET /health</pre>
-            <p><strong>Webhook接口:</strong></p>
-            <pre>POST /api/webhook?secret=YOUR_SECRET</pre>
-            <p><strong>WebSocket连接:</strong></p>
-            <pre>ws://localhost:` + h.config.Server.Port + `/ws/YOUR_SECRET</pre>
-            <p><strong>API文档:</strong></p>
-            <pre>GET /api</pre>
+        <h1>🚫 Web控制台已禁用</h1>
+        <div class="disabled">
+            Web控制台功能当前已被禁用。如需启用，请修改配置文件中的 ui.enable_web_console 设置为 true。
         </div>
     </div>
 </body>
@@ -903,39 +885,48 @@ func (h *Handlers) WebConsoleHandler(c *gin.Context) {
 		return
 	}
 
-	if !h.config.UI.EnableWebConsole {
-		c.Header("Content-Type", "text/html; charset=utf-8")
-		c.String(http.StatusForbidden, `
+	// 尝试从嵌入的文件系统返回React前端
+	if h.staticFS != nil {
+		if indexFile, err := h.staticFS.Open("web/dist/index.html"); err == nil {
+			defer indexFile.Close()
+			if content, err := io.ReadAll(indexFile); err == nil {
+				c.Header("Content-Type", "text/html; charset=utf-8")
+				c.Data(http.StatusOK, "text/html; charset=utf-8", content)
+				return
+			}
+		}
+	}
+
+	// 回退：检查外部静态文件
+	if _, err := os.Stat("./web/dist/index.html"); err == nil {
+		c.File("./web/dist/index.html")
+		return
+	}
+
+	// 最后回退：显示前端文件缺失错误页面
+	c.Header("Content-Type", "text/html; charset=utf-8")
+	c.String(http.StatusOK, `
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Web控制台已禁用 - QQ Webhook Pro</title>
+    <title>QQ Webhook Pro - 前端文件缺失</title>
     <meta charset="utf-8">
     <style>
         body { font-family: Arial, sans-serif; text-align: center; padding: 50px; background: #f5f5f5; }
-        .container { max-width: 500px; margin: 0 auto; background: white; padding: 40px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+        .container { max-width: 600px; margin: 0 auto; background: white; padding: 40px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
         h1 { color: #ff4d4f; margin-bottom: 20px; }
-        .warning { padding: 20px; margin: 20px 0; background: #fff2e8; color: #fa8c16; border: 1px solid #ffbb96; border-radius: 5px; }
-        .info { background: #f6ffed; color: #52c41a; border: 1px solid #b7eb8f; padding: 15px; border-radius: 5px; margin: 20px 0; }
+        .error { background: #fff2f0; color: #ff4d4f; border: 1px solid #ffccc7; padding: 20px; border-radius: 5px; }
     </style>
 </head>
 <body>
     <div class="container">
-        <h1>🚫 Web控制台已禁用</h1>
-        <div class="warning">
-            Web管理控制台当前已禁用。如需使用管理功能，请在配置文件中启用 ui.enable_web_console 选项。
-        </div>
-        <div class="info">
-            💡 API服务仍然可用，可直接使用API端点进行操作。
+        <h1>⚠️ 前端文件缺失</h1>
+        <div class="error">
+            Web控制台前端文件未找到。请确保已正确构建前端项目。
         </div>
     </div>
 </body>
 </html>`)
-		return
-	}
-	
-	// 如果启用，返回控制台页面
-	c.File("./web/dist/index.html")
 }
 
 // GetHealth 健康检查
