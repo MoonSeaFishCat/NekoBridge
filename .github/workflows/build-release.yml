@@ -29,11 +29,13 @@ jobs:
             goarch: amd64
             ext: ""
             archive_ext: "tar.gz"
+            cc: "gcc"
           - os: windows
             goos: windows
             goarch: amd64
             ext: ".exe"
             archive_ext: "zip"
+            cc: "x86_64-w64-mingw32-gcc"
 
     steps:
       - name: Checkout code
@@ -76,6 +78,11 @@ jobs:
         working-directory: ./web/frontend
         run: pnpm build
 
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-multilib gcc-mingw-w64
+
       - name: Get Go dependencies
         run: go mod download
 
@@ -83,7 +90,8 @@ jobs:
         env:
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
-          CGO_ENABLED: 0
+          CGO_ENABLED: 1
+          CC: ${{ matrix.cc }}
         run: |
           go build -ldflags="-w -s" -o nekobridge${{ matrix.ext }} .
 
