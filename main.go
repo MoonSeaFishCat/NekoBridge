@@ -1,6 +1,7 @@
 package main
 
 import (
+	"embed"
 	"fmt"
 	"log"
 	"os"
@@ -14,6 +15,9 @@ import (
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 )
+
+//go:embed web/dist/*
+var staticFiles embed.FS
 
 
 func main() {
@@ -63,7 +67,7 @@ func main() {
 	wsManager := websocket.NewManager()
 
 	// 初始化处理器
-	handlers.Init(r, cfg, wsManager)
+	handlers.Init(r, cfg, wsManager, staticFiles)
 
 	// 打印服务信息
 	printServiceInfo(cfg)

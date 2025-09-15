@@ -1,6 +1,9 @@
 package handlers
 
 import (
+	"embed"
+	"io"
+	"io/fs"
 	"net/http"
 	"strings"
 	"nekobridge/internal/config"
@@ -25,14 +28,20 @@ type Handlers struct {
 	signer         *utils.Ed25519Signer
 	cpuMonitor     *monitor.CpuMonitor
 	startTime      time.Time
+	staticFS       *embed.FS
 }
 
 // NewHandlers 创建新的处理器
-func NewHandlers(cfg *config.Config, wsManager *websocket.Manager) *Handlers {
+func NewHandlers(cfg *config.Config, wsManager *websocket.Manager, staticFS ...embed.FS) *Handlers {
 	logger := utils.NewLogger(cfg.Logging.MaxLogEntries, cfg.Logging.Level)
 	jwtManager := utils.NewJWTManager(cfg.Auth.JWTSecret)
 	signer, _ := utils.NewEd25519Signer()
 	cpuMonitor := monitor.NewCpuMonitor()
+
+	var fs *embed.FS
+	if len(staticFS) > 0 {
+		fs = &staticFS[0]
+	}
 
 	return &Handlers{
 		config:         cfg,
@@ -42,29 +51,91 @@ func NewHandlers(cfg *config.Config, wsManager *websocket.Manager) *Handlers {
 		signer:         signer,
 		cpuMonitor:     cpuMonitor,
 		startTime:      time.Now(),
+		staticFS:       fs,
 	}
 }
 
 // Init 初始化路由
-func Init(r *gin.Engine, cfg *config.Config, wsManager *websocket.Manager) {
-	h := NewHandlers(cfg, wsManager)
+func Init(r *gin.Engine, cfg *config.Config, wsManager *websocket.Manager, staticFS ...embed.FS) {
+	h := NewHandlers(cfg, wsManager, staticFS...)
 	wsManager.SetConfig(cfg)
 
-	// 静态文件服务
-	r.Static("/assets", "./web/dist/assets")
-	r.StaticFile("/favicon.ico", "./web/dist/favicon.ico")
-	r.StaticFile("/vite.svg", "./web/dist/vite.svg")
+	// 静态文件服务 - 优先使用嵌入文件系统
+	if len(staticFS) > 0 {
+		// 使用嵌入的文件系统
+		embeddedFS := staticFS[0]
+		
+		// 创建子文件系统，只包含 web/dist 目录
+		distFS, err := fs.Sub(embeddedFS, "web/dist")
+		if err == nil {
+			// 服务静态文件
+			r.GET("/assets/*filepath", func(c *gin.Context) {
+				filePath := c.Param("filepath")
+				// 去掉开头的 "/"
+				if strings.HasPrefix(filePath, "/") {
+					filePath = filePath[1:]
+				}
+				
+				assetPath := "assets/" + filePath
+				if data, err := distFS.Open(assetPath); err == nil {
+					defer data.Close()
+					if content, err := io.ReadAll(data); err == nil {
+						// 根据文件扩展名设置正确的 Content-Type
+						if strings.HasSuffix(filePath, ".css") {
+							c.Header("Content-Type", "text/css")
+						} else if strings.HasSuffix(filePath, ".js") {
+							c.Header("Content-Type", "application/javascript")
+						}
+						c.Data(200, "", content)
+						return
+					}
+				}
+				c.Status(404)
+			})
+			
+			// 服务特定文件
+			r.GET("/favicon.ico", func(c *gin.Context) {
+				if data, err := distFS.Open("favicon.ico"); err == nil {
+					defer data.Close()
+					if content, err := io.ReadAll(data); err == nil {
+						c.Data(200, "image/x-icon", content)
+						return
+					}
+				}
+				c.Status(404)
+			})
+			
+			r.GET("/vite.svg", func(c *gin.Context) {
+				if data, err := distFS.Open("vite.svg"); err == nil {
+					defer data.Close()
+					if content, err := io.ReadAll(data); err == nil {
+						c.Data(200, "image/svg+xml", content)
+						return
+					}
+				}
+				c.Status(404)
+			})
+		} else {
+			// 回退到外部文件系统
+			r.Static("/assets", "./web/dist/assets")
+			r.StaticFile("/favicon.ico", "./web/dist/favicon.ico")
+			r.StaticFile("/vite.svg", "./web/dist/vite.svg")
+		}
+	} else {
+		// 使用外部文件系统
+		r.Static("/assets", "./web/dist/assets")
+		r.StaticFile("/favicon.ico", "./web/dist/favicon.ico")
+		r.StaticFile("/vite.svg", "./web/dist/vite.svg")
+	}
 	
 	// Web控制台页面（需要检查是否启用）
-	r.GET("/", h.WebConsoleHandler)
-
-	// API路由组
+	r.GET("/", h.WebConsoleHandler)	// API路由组
 	api := r.Group("/api")
 	{
 		// 健康检查
 		api.GET("/health", h.HealthCheck)
 		api.GET("/", h.APIInfo)
-		
+
 		// Web控制台状态检查（不需要认证）
 		api.GET("/web-console/status", h.GetWebConsoleStatus)
 
@@ -75,8 +146,6 @@ func Init(r *gin.Engine, cfg *config.Config, wsManager *websocket.Manager) {
 			auth.POST("/logout", h.AuthMiddleware(), h.Logout)
 			auth.GET("/verify", h.AuthMiddleware(), h.VerifyToken)
 		}
-		
-		
 
 		// 需要认证的路由
 		authenticated := api.Group("")
@@ -225,8 +294,8 @@ func (h *Handlers) HealthCheck(c *gin.Context) {
 // Login 登录
 func (h *Handlers) Login(c *gin.Context) {
 	var req struct {
-		Username  string `json:"username" binding:"required"`
-		Password  string `json:"password" binding:"required"`
+		Username string `json:"username" binding:"required"`
+		Password string `json:"password" binding:"required"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, models.LoginResponse{
@@ -235,7 +304,6 @@ func (h *Handlers) Login(c *gin.Context) {
 		})
 		return
 	}
-	
 
 	// 验证用户名和密码
 	// 首先检查用户名
@@ -247,7 +315,7 @@ func (h *Handlers) Login(c *gin.Context) {
 		})
 		return
 	}
-	
+
 	// 检查密码 - 支持明文和哈希密码
 	var passwordValid bool
 	// 如果配置中的密码以$2开头，说明是bcrypt哈希
@@ -257,7 +325,7 @@ func (h *Handlers) Login(c *gin.Context) {
 		// 兼容明文密码
 		passwordValid = req.Password == h.config.Auth.Password
 	}
-	
+
 	if !passwordValid {
 		h.logger.Log("warning", "用户登录失败", gin.H{"username": req.Username, "reason": "invalid_password"})
 		c.JSON(http.StatusUnauthorized, models.LoginResponse{
@@ -291,9 +359,9 @@ func (h *Handlers) Login(c *gin.Context) {
 func (h *Handlers) Logout(c *gin.Context) {
 	user, _ := c.Get("user")
 	claims := user.(*utils.Claims)
-	
+
 	h.logger.Log("info", "用户登出", gin.H{"username": claims.Username})
-	
+
 	c.JSON(http.StatusOK, models.APIResponse{
 		Success: true,
 		Message: "登出成功",
@@ -304,7 +372,7 @@ func (h *Handlers) Logout(c *gin.Context) {
 func (h *Handlers) VerifyToken(c *gin.Context) {
 	user, _ := c.Get("user")
 	claims := user.(*utils.Claims)
-	
+
 	c.JSON(http.StatusOK, gin.H{
 		"valid": true,
 		"user":  claims,
@@ -334,7 +402,7 @@ func (h *Handlers) Webhook(c *gin.Context) {
 	// 处理签名验证请求
 	if req.D.EventTs != "" && req.D.PlainToken != "" {
 		h.logger.Log("info", "收到签名校验请求", gin.H{"secret": secret})
-		
+
 		if h.config.Security.EnableSignatureValidation {
 			result, err := h.signer.GenerateSignature(secret, req.D.EventTs, req.D.PlainToken)
 			if err != nil {
@@ -344,9 +412,9 @@ func (h *Handlers) Webhook(c *gin.Context) {
 				})
 				return
 			}
-			
+
 			h.logger.Log("info", "签名校验成功", gin.H{"secret": secret})
-			
+
 			// 自动添加密钥（如果启用）
 			if !h.config.Security.RequireManualKeyManagement {
 				// 检查密钥是否已存在于数据库
@@ -362,32 +430,32 @@ func (h *Handlers) Webhook(c *gin.Context) {
 						MaxConnections: h.config.Security.MaxConnectionsPerSecret,
 						CreatedBy:      "system",
 					}
-					
+
 					if err := secretService.CreateSecret(secretRecord); err != nil {
 						h.logger.Log("error", "自动添加密钥到数据库失败", gin.H{"secret": secret, "error": err.Error()})
 					} else {
 						h.logger.Log("info", "自动添加密钥到数据库成功", gin.H{"secret": secret})
 					}
 				}
-				
+
 				// 添加到内存配置
 				h.config.AddSecret(secret, config.SecretConfig{
-					Description: "自动生成的密钥（签名验证通过）",
-					Enabled:     true,
+					Description:    "自动生成的密钥（签名验证通过）",
+					Enabled:        true,
 					MaxConnections: h.config.Security.MaxConnectionsPerSecret,
 				})
 				h.logger.Log("info", "签名验证通过，自动添加新密钥", gin.H{"secret": secret})
-				
+
 				// 广播密钥更新事件到管理界面
 				h.broadcastSecretUpdate("secret_added", secret)
 			}
-			
+
 			h.config.MarkSecretUsed(secret)
 			c.JSON(http.StatusOK, result)
 			return
 		} else {
 			h.logger.Log("warning", "签名验证已禁用，允许连接", gin.H{"secret": secret})
-			
+
 			// 如果启用自动模式且密钥不存在，自动添加
 			if !h.config.Security.RequireManualKeyManagement {
 				// 检查密钥是否已存在于数据库
@@ -403,26 +471,26 @@ func (h *Handlers) Webhook(c *gin.Context) {
 						MaxConnections: h.config.Security.MaxConnectionsPerSecret,
 						CreatedBy:      "system",
 					}
-					
+
 					if err := secretService.CreateSecret(secretRecord); err != nil {
 						h.logger.Log("error", "自动添加密钥到数据库失败", gin.H{"secret": secret, "error": err.Error()})
 					} else {
 						h.logger.Log("info", "自动添加密钥到数据库成功", gin.H{"secret": secret})
 					}
 				}
-				
+
 				// 添加到内存配置
 				h.config.AddSecret(secret, config.SecretConfig{
-					Description: "自动生成的密钥（签名验证已禁用）",
-					Enabled:     true,
+					Description:    "自动生成的密钥（签名验证已禁用）",
+					Enabled:        true,
 					MaxConnections: h.config.Security.MaxConnectionsPerSecret,
 				})
 				h.logger.Log("info", "签名验证已禁用，自动添加新密钥", gin.H{"secret": secret})
-				
+
 				// 广播密钥更新事件到管理界面
 				h.broadcastSecretUpdate("secret_added", secret)
 			}
-			
+
 			c.JSON(http.StatusOK, gin.H{
 				"plain_token": req.D.PlainToken,
 				"signature":   "signature_disabled",
@@ -442,19 +510,19 @@ func (h *Handlers) Webhook(c *gin.Context) {
 
 	// 处理普通消息
 	h.logger.Log("info", "收到Webhook消息", gin.H{"secret": secret})
-	
+
 	// 发送到WebSocket连接
 	message := models.WebSocketMessage{
 		Type: "webhook",
 		Data: req,
 	}
-	
+
 	if err := h.wsManager.SendMessage(secret, message); err != nil {
 		h.logger.Log("warning", "未找到活跃连接", gin.H{"secret": secret})
 		c.JSON(http.StatusOK, gin.H{"status": "连接未就绪"})
 		return
 	}
-	
+
 	h.logger.Log("info", "消息推送成功", gin.H{"secret": secret})
 	h.config.MarkSecretUsed(secret)
 	c.JSON(http.StatusOK, gin.H{"status": "推送成功"})
@@ -471,7 +539,7 @@ func (h *Handlers) broadcastSecretUpdate(eventType, secret string) {
 			"timestamp":  time.Now().Format(time.RFC3339),
 		},
 	}
-	
+
 	// TODO: 广播到所有管理界面连接（需要扩展WebSocket管理器支持管理连接）
 	// 暂时记录日志和消息，后续可以扩展实现
 	h.logger.Log("info", "密钥更新事件", map[string]interface{}{
@@ -572,5 +640,3 @@ func getLoadAverage() []float64 {
 	// 为了简化，返回模拟值
 	return []float64{0.5, 0.6, 0.7}
 }
-
-

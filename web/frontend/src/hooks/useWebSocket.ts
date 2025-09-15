@@ -86,7 +86,7 @@ export const useWebSocket = (options: UseWebSocketOptions): UseWebSocketReturn =
         // 如果不是手动断开且启用了重连，则尝试重连
         if (!isManualDisconnectRef.current && enabled && reconnectAttemptsRef.current < maxReconnectAttempts) {
           reconnectAttemptsRef.current++;
-          reconnectTimeoutRef.current = setTimeout(() => {
+          reconnectTimeoutRef.current = window.setTimeout(() => {
             connect();
           }, reconnectInterval);
         }
@@ -123,7 +123,7 @@ export const useWebSocket = (options: UseWebSocketOptions): UseWebSocketReturn =
   const reconnect = useCallback(() => {
     disconnect();
     reconnectAttemptsRef.current = 0;
-    setTimeout(() => {
+    window.setTimeout(() => {
       connect();
     }, 1000);
   }, [disconnect, connect]);
