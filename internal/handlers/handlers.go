@@ -663,7 +663,7 @@ func (h *Handlers) WebSocketHandler(c *gin.Context) {
 			}
 
 			// 处理二进制消息
-			msg := models.WebSocketMessage{
+			_ = models.WebSocketMessage{
 				Type:   "binary",
 				Data:   nil,
 				Format: models.MessageFormatBinary,
@@ -676,6 +676,10 @@ func (h *Handlers) WebSocketHandler(c *gin.Context) {
 
 			// 可以在这里添加对二进制消息的自定义处理
 			// 例如：解析协议、处理文件传输等
+			// 示例：回显二进制数据
+			// if err := conn.WriteMessage(gorilla.BinaryMessage, data); err != nil {
+			//     h.logger.Log("error", "发送二进制响应失败", err)
+			// }
 
 		case gorilla.PingMessage:
 			// 自动回复Pong
