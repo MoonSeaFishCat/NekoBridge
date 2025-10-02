@@ -71,13 +71,17 @@ type LoggingConfig struct {
 
 // WebSocketConfig WebSocket配置
 type WebSocketConfig struct {
-	EnableHeartbeat         bool `mapstructure:"enable_heartbeat"`
-	HeartbeatInterval       int  `mapstructure:"heartbeat_interval"`
-	HeartbeatTimeout        int  `mapstructure:"heartbeat_timeout"`
-	ClientHeartbeatInterval int  `mapstructure:"client_heartbeat_interval"`
-	MaxMessageSize          int  `mapstructure:"max_message_size"`
-	ReadTimeout             int  `mapstructure:"read_timeout"`
-	WriteTimeout            int  `mapstructure:"write_timeout"`
+	EnableHeartbeat         bool     `mapstructure:"enable_heartbeat"`
+	HeartbeatInterval       int      `mapstructure:"heartbeat_interval"`
+	HeartbeatTimeout        int      `mapstructure:"heartbeat_timeout"`
+	ClientHeartbeatInterval int      `mapstructure:"client_heartbeat_interval"`
+	MaxMessageSize          int      `mapstructure:"max_message_size"`
+	ReadTimeout             int      `mapstructure:"read_timeout"`
+	WriteTimeout            int      `mapstructure:"write_timeout"`
+	SupportedFormats        []string `mapstructure:"supported_formats"` // 支持的消息格式: json, text, binary
+	DefaultFormat           string   `mapstructure:"default_format"`    // 默认消息格式
+	EnableBinaryMessages    bool     `mapstructure:"enable_binary_messages"` // 是否启用二进制消息
+	MaxBinarySize           int      `mapstructure:"max_binary_size"`   // 最大二进制消息大小（字节）
 }
 
 // SecretConfig 密钥配置
@@ -132,6 +136,13 @@ var defaultConfig = Config{
 		HeartbeatInterval:       30000,
 		HeartbeatTimeout:        5000,
 		ClientHeartbeatInterval: 25000,
+		MaxMessageSize:          65536,    // 64KB
+		ReadTimeout:             60000,    // 60秒
+		WriteTimeout:            10000,    // 10秒
+		SupportedFormats:        []string{"json", "text", "binary"},
+		DefaultFormat:           "json",
+		EnableBinaryMessages:    true,
+		MaxBinarySize:           1048576,  // 1MB
 	},
 	Secrets: make(map[string]SecretConfig),
 }

@@ -46,10 +46,21 @@ type Secret struct {
 }
 
 
+// MessageFormat WebSocket消息格式
+type MessageFormat string
+
+const (
+	MessageFormatJSON   MessageFormat = "json"   // JSON格式（默认）
+	MessageFormatText   MessageFormat = "text"   // 纯文本格式
+	MessageFormatBinary MessageFormat = "binary" // 二进制格式
+)
+
 // WebSocketMessage WebSocket消息
 type WebSocketMessage struct {
-	Type string `json:"type"`
-	Data any    `json:"data"`
+	Type   string        `json:"type"`
+	Data   any           `json:"data"`
+	Format MessageFormat `json:"format,omitempty"` // 消息格式
+	Raw    []byte        `json:"-"`                // 原始二进制数据（不序列化）
 }
 
 // APIResponse API响应

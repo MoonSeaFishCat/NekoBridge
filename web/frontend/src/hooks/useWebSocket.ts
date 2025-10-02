@@ -21,6 +21,8 @@ interface UseWebSocketReturn {
   status: WebSocketStatus;
   lastMessage: WebSocketMessage | null;
   sendMessage: (message: WebSocketMessage) => void;
+  sendBinary: (data: ArrayBuffer | Blob) => void;
+  sendText: (text: string) => void;
   connect: () => void;
   disconnect: () => void;
   reconnect: () => void;
@@ -71,11 +73,50 @@ export const useWebSocket = (options: UseWebSocketOptions): UseWebSocketReturn =
 
       ws.onmessage = (event) => {
         try {
-          const message: WebSocketMessage = JSON.parse(event.data);
-          setLastMessage(message);
-          onMessage?.(message);
+          // 检查消息类型
+          if (event.data instanceof ArrayBuffer) {
+            // 二进制消息
+            const message: WebSocketMessage = {
+              type: 'binary',
+              data: null,
+              format: 'binary',
+              raw: event.data,
+            };
+            setLastMessage(message);
+            onMessage?.(message);
+          } else if (event.data instanceof Blob) {
+            // Blob消息，转换为ArrayBuffer
+            event.data.arrayBuffer().then((buffer) => {
+              const message: WebSocketMessage = {
+                type: 'binary',
+                data: null,
+                format: 'binary',
+                raw: buffer,
+              };
+              setLastMessage(message);
+              onMessage?.(message);
+            });
+          } else {
+            // 文本消息
+            try {
+              // 尝试解析为JSON
+              const message: WebSocketMessage = JSON.parse(event.data);
+              message.format = message.format || 'json';
+              setLastMessage(message);
+              onMessage?.(message);
+            } catch {
+              // 解析失败，作为纯文本处理
+              const message: WebSocketMessage = {
+                type: 'text',
+                data: event.data,
+                format: 'text',
+              };
+              setLastMessage(message);
+              onMessage?.(message);
+            }
+          }
         } catch (error) {
-          console.error('Failed to parse WebSocket message:', error);
+          console.error('Failed to process WebSocket message:', error);
         }
       };
 
@@ -141,6 +182,32 @@ export const useWebSocket = (options: UseWebSocketOptions): UseWebSocketReturn =
     }
   }, []);
 
+  // 发送二进制消息
+  const sendBinary = useCallback((data: ArrayBuffer | Blob) => {
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
+      try {
+        wsRef.current.send(data);
+      } catch (error) {
+        console.error('Failed to send binary WebSocket message:', error);
+      }
+    } else {
+      console.warn('WebSocket is not connected');
+    }
+  }, []);
+
+  // 发送文本消息
+  const sendText = useCallback((text: string) => {
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
+      try {
+        wsRef.current.send(text);
+      } catch (error) {
+        console.error('Failed to send text WebSocket message:', error);
+      }
+    } else {
+      console.warn('WebSocket is not connected');
+    }
+  }, []);
+
   // 自动连接
   useEffect(() => {
     if (enabled) {
@@ -167,6 +234,8 @@ export const useWebSocket = (options: UseWebSocketOptions): UseWebSocketReturn =
     status,
     lastMessage,
     sendMessage,
+    sendBinary,
+    sendText,
     connect,
     disconnect,
     reconnect,

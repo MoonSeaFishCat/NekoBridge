@@ -39,10 +39,15 @@ export interface BanInfo {
   bannedBy: string;
 }
 
+// WebSocket消息格式类型
+export type MessageFormat = 'json' | 'text' | 'binary';
+
 // WebSocket消息
 export interface WebSocketMessage {
   type: string;
   data: any;
+  format?: MessageFormat; // 消息格式
+  raw?: ArrayBuffer; // 原始二进制数据
 }
 
 // API响应

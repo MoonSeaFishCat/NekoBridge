@@ -104,12 +104,60 @@ func (m *Manager) sendMessage(secret string, message models.WebSocketMessage) er
 		return ErrConnectionNotFound
 	}
 
-	data, err := json.Marshal(message)
-	if err != nil {
-		return err
+	// 根据消息格式选择发送方式
+	switch message.Format {
+	case models.MessageFormatBinary:
+		// 发送二进制数据
+		if message.Raw != nil {
+			return conn.WriteMessage(websocket.BinaryMessage, message.Raw)
+		}
+		return conn.WriteMessage(websocket.BinaryMessage, []byte{})
+
+	case models.MessageFormatText:
+		// 发送纯文本数据
+		if message.Data != nil {
+			if text, ok := message.Data.(string); ok {
+				return conn.WriteMessage(websocket.TextMessage, []byte(text))
+			}
+		}
+		return conn.WriteMessage(websocket.TextMessage, []byte{})
+
+	case models.MessageFormatJSON:
+		fallthrough
+	default:
+		// 默认使用JSON格式
+		data, err := json.Marshal(message)
+		if err != nil {
+			return err
+		}
+		return conn.WriteMessage(websocket.TextMessage, data)
+	}
+}
+
+// SendBinaryMessage 发送二进制消息
+func (m *Manager) SendBinaryMessage(secret string, data []byte) error {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	conn, exists := m.connections[secret]
+	if !exists {
+		return ErrConnectionNotFound
 	}
 
-	return conn.WriteMessage(websocket.TextMessage, data)
+	return conn.WriteMessage(websocket.BinaryMessage, data)
+}
+
+// SendTextMessage 发送文本消息
+func (m *Manager) SendTextMessage(secret string, text string) error {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	conn, exists := m.connections[secret]
+	if !exists {
+		return ErrConnectionNotFound
+	}
+
+	return conn.WriteMessage(websocket.TextMessage, []byte(text))
 }
 
 // GetConnection 获取连接

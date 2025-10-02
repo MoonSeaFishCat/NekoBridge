@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"embed"
+	"encoding/json"
 	"io"
 	"io/fs"
 	"net/http"
@@ -577,6 +578,8 @@ func (h *Handlers) WebSocketHandler(c *gin.Context) {
 		CheckOrigin: func(r *http.Request) bool {
 			return true // 允许所有来源
 		},
+		ReadBufferSize:  h.config.WebSocket.MaxMessageSize,
+		WriteBufferSize: h.config.WebSocket.MaxMessageSize,
 	}
 
 	conn, err := upgrader.Upgrade(c.Writer, c.Request, nil)
@@ -585,6 +588,14 @@ func (h *Handlers) WebSocketHandler(c *gin.Context) {
 		return
 	}
 	defer conn.Close()
+
+	// 设置读写超时
+	if h.config.WebSocket.ReadTimeout > 0 {
+		conn.SetReadDeadline(time.Now().Add(time.Duration(h.config.WebSocket.ReadTimeout) * time.Millisecond))
+	}
+	if h.config.WebSocket.WriteTimeout > 0 {
+		conn.SetWriteDeadline(time.Now().Add(time.Duration(h.config.WebSocket.WriteTimeout) * time.Millisecond))
+	}
 
 	// 添加到连接管理器
 	if err := h.wsManager.AddConnection(secret, conn); err != nil {
@@ -595,24 +606,92 @@ func (h *Handlers) WebSocketHandler(c *gin.Context) {
 
 	// 处理WebSocket消息
 	for {
-		var msg models.WebSocketMessage
-		if err := conn.ReadJSON(&msg); err != nil {
+		// 读取消息类型
+		messageType, data, err := conn.ReadMessage()
+		if err != nil {
 			if gorilla.IsUnexpectedCloseError(err, gorilla.CloseGoingAway, gorilla.CloseAbnormalClosure) {
 				h.logger.Log("error", "WebSocket读取错误", err)
 			}
 			break
 		}
 
-		// 处理心跳消息
-		if msg.Type == "ping" {
-			pongMsg := models.WebSocketMessage{
-				Type: "pong",
-				Data: gin.H{"timestamp": time.Now().Unix()},
+		// 根据消息类型处理
+		switch messageType {
+		case gorilla.TextMessage:
+			// 尝试解析为JSON
+			var msg models.WebSocketMessage
+			if err := json.Unmarshal(data, &msg); err != nil {
+				// 如果解析失败，作为纯文本处理
+				msg = models.WebSocketMessage{
+					Type:   "text",
+					Data:   string(data),
+					Format: models.MessageFormatText,
+				}
+				h.logger.Log("info", "收到文本消息", gin.H{"secret": secret, "text": string(data)})
+			} else {
+				// 成功解析为JSON
+				msg.Format = models.MessageFormatJSON
+				h.logger.Log("info", "收到JSON消息", gin.H{"secret": secret, "data": msg})
 			}
-			conn.WriteJSON(pongMsg)
-			h.logger.Log("debug", "回复客户端心跳", gin.H{"secret": secret})
-		} else {
-			h.logger.Log("info", "收到WebSocket消息", gin.H{"secret": secret, "data": msg})
+
+			// 处理心跳消息
+			if msg.Type == "ping" {
+				pongMsg := models.WebSocketMessage{
+					Type:   "pong",
+					Data:   gin.H{"timestamp": time.Now().Unix()},
+					Format: models.MessageFormatJSON,
+				}
+				conn.WriteJSON(pongMsg)
+				h.logger.Log("debug", "回复客户端心跳", gin.H{"secret": secret})
+			}
+
+		case gorilla.BinaryMessage:
+			// 检查是否启用二进制消息
+			if !h.config.WebSocket.EnableBinaryMessages {
+				h.logger.Log("warning", "二进制消息被拒绝：未启用", gin.H{"secret": secret})
+				continue
+			}
+
+			// 检查二进制消息大小
+			if h.config.WebSocket.MaxBinarySize > 0 && len(data) > h.config.WebSocket.MaxBinarySize {
+				h.logger.Log("warning", "二进制消息被拒绝：超过最大大小", gin.H{
+					"secret":   secret,
+					"size":     len(data),
+					"maxSize":  h.config.WebSocket.MaxBinarySize,
+				})
+				continue
+			}
+
+			// 处理二进制消息
+			msg := models.WebSocketMessage{
+				Type:   "binary",
+				Data:   nil,
+				Format: models.MessageFormatBinary,
+				Raw:    data,
+			}
+			h.logger.Log("info", "收到二进制消息", gin.H{
+				"secret": secret,
+				"size":   len(data),
+			})
+
+			// 可以在这里添加对二进制消息的自定义处理
+			// 例如：解析协议、处理文件传输等
+
+		case gorilla.PingMessage:
+			// 自动回复Pong
+			if err := conn.WriteMessage(gorilla.PongMessage, nil); err != nil {
+				h.logger.Log("error", "发送Pong消息失败", err)
+			}
+
+		case gorilla.PongMessage:
+			// 收到Pong响应
+			h.logger.Log("debug", "收到Pong消息", gin.H{"secret": secret})
+
+		default:
+			h.logger.Log("warning", "未知的WebSocket消息类型", gin.H{
+				"secret": secret,
+				"type":   messageType,
+			})
 		}
 	}
 }

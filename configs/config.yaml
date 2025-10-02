@@ -36,6 +36,14 @@ websocket:
     heartbeatinterval: 30000
     heartbeattimeout: 5000
     clientheartbeatinterval: 25000
-    maxmessagesize: 0
-    readtimeout: 0
-    writetimeout: 0
+    maxmessagesize: 65536
+    readtimeout: 60000
+    writetimeout: 10000
+    supportedformats:
+        - json
+        - text
+        - binary
+    defaultformat: json
+    enablebinarymessages: true
+    maxbinarysize: 1048576
+
