@@ -3,9 +3,11 @@ package handlers
 import (
 	"embed"
 	"encoding/json"
+	"fmt"
 	"io"
 	"io/fs"
 	"net/http"
+	"os"
 	"strings"
 	"nekobridge/internal/config"
 	"nekobridge/internal/database"
@@ -663,7 +665,7 @@ func (h *Handlers) WebSocketHandler(c *gin.Context) {
 			}
 
 			// 处理二进制消息
-			_ = models.WebSocketMessage{
+			msg := models.WebSocketMessage{
 				Type:   "binary",
 				Data:   nil,
 				Format: models.MessageFormatBinary,
@@ -674,12 +676,8 @@ func (h *Handlers) WebSocketHandler(c *gin.Context) {
 				"size":   len(data),
 			})
 
-			// 可以在这里添加对二进制消息的自定义处理
-			// 例如：解析协议、处理文件传输等
-			// 示例：回显二进制数据
-			// if err := conn.WriteMessage(gorilla.BinaryMessage, data); err != nil {
-			//     h.logger.Log("error", "发送二进制响应失败", err)
-			// }
+			// 处理二进制数据的业务逻辑
+			h.handleBinaryMessage(secret, msg, data, conn)
 
 		case gorilla.PingMessage:
 			// 自动回复Pong
@@ -698,6 +696,96 @@ func (h *Handlers) WebSocketHandler(c *gin.Context) {
 			})
 		}
 	}
+}
+
+// handleBinaryMessage 处理二进制消息
+func (h *Handlers) handleBinaryMessage(secret string, msg models.WebSocketMessage, data []byte, conn *gorilla.Conn) {
+	// 根据数据内容或协议头判断处理方式
+	if len(data) == 0 {
+		h.logger.Log("warning", "收到空的二进制消息", gin.H{"secret": secret})
+		return
+	}
+
+	// 示例处理逻辑：
+	// 1. 如果是心跳包（特定字节序列）
+	if len(data) >= 4 && string(data[:4]) == "PING" {
+		// 回复PONG
+		pongData := []byte("PONG")
+		if err := conn.WriteMessage(gorilla.BinaryMessage, pongData); err != nil {
+			h.logger.Log("error", "发送二进制PONG失败", err)
+		} else {
+			h.logger.Log("debug", "回复二进制心跳", gin.H{"secret": secret})
+		}
+		return
+	}
+
+	// 2. 如果是文件上传（以特定魔数开头）
+	if len(data) >= 8 && string(data[:4]) == "FILE" {
+		h.handleFileUpload(secret, data[4:], conn)
+		return
+	}
+
+	// 3. 默认：回显二进制数据（用于测试）
+	h.logger.Log("info", "回显二进制数据", gin.H{
+		"secret": secret,
+		"size":   len(data),
+		"first4bytes": fmt.Sprintf("%x", data[:min(4, len(data))]),
+	})
+	
+	// 回显数据
+	if err := conn.WriteMessage(gorilla.BinaryMessage, data); err != nil {
+		h.logger.Log("error", "回显二进制数据失败", err)
+	}
+}
+
+// handleFileUpload 处理文件上传
+func (h *Handlers) handleFileUpload(secret string, fileData []byte, conn *gorilla.Conn) {
+	// 创建data目录
+	dataDir := "./data/uploads"
+	if err := os.MkdirAll(dataDir, 0755); err != nil {
+		h.logger.Log("error", "创建上传目录失败", err)
+		return
+	}
+
+	// 生成文件名：时间戳_secret.bin
+	filename := fmt.Sprintf("%d_%s.bin", time.Now().Unix(), secret)
+	filepath := fmt.Sprintf("%s/%s", dataDir, filename)
+
+	// 保存文件
+	if err := os.WriteFile(filepath, fileData, 0644); err != nil {
+		h.logger.Log("error", "保存上传文件失败", err)
+		return
+	}
+
+	h.logger.Log("info", "文件上传成功", gin.H{
+		"secret":   secret,
+		"filename": filename,
+		"size":     len(fileData),
+		"path":     filepath,
+	})
+
+	// 回复上传成功消息（JSON格式）
+	response := models.WebSocketMessage{
+		Type: "file_uploaded",
+		Data: gin.H{
+			"filename": filename,
+			"size":     len(fileData),
+			"path":     filepath,
+		},
+		Format: models.MessageFormatJSON,
+	}
+	
+	if err := conn.WriteJSON(response); err != nil {
+		h.logger.Log("error", "发送文件上传响应失败", err)
+	}
+}
+
+// min 返回两个整数中的较小值
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }
 
 // 辅助函数

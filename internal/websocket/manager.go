@@ -196,6 +196,30 @@ func (m *Manager) GetConnections() []models.Connection {
 	return connections
 }
 
+// BroadcastBinary 广播二进制消息到所有连接
+func (m *Manager) BroadcastBinary(data []byte) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	for secret, conn := range m.connections {
+		if err := conn.WriteMessage(websocket.BinaryMessage, data); err != nil {
+			log.Printf("广播二进制消息失败 [%s]: %v", secret, err)
+		}
+	}
+}
+
+// BroadcastText 广播文本消息到所有连接
+func (m *Manager) BroadcastText(text string) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	for secret, conn := range m.connections {
+		if err := conn.WriteMessage(websocket.TextMessage, []byte(text)); err != nil {
+			log.Printf("广播文本消息失败 [%s]: %v", secret, err)
+		}
+	}
+}
+
 // GetConnectionCount 获取连接数
 func (m *Manager) GetConnectionCount() int {
 	m.mu.RLock()
