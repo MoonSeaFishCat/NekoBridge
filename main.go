@@ -1,24 +1,27 @@
 package main
 
 import (
+	"context"
 	"embed"
 	"fmt"
 	"log"
-	"os"
 	"nekobridge/internal/config"
 	"nekobridge/internal/database"
 	"nekobridge/internal/handlers"
 	"nekobridge/internal/websocket"
+	"net/http"
+	"os"
+	"os/signal"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 )
 
-//go:embed web/dist/*
+//go:embed all:web/dist
 var staticFiles embed.FS
-
 
 func main() {
 	// 打印启动横幅
@@ -65,6 +68,8 @@ func main() {
 
 	// 初始化WebSocket管理器
 	wsManager := websocket.NewManager()
+	wsManager.SetConfig(cfg)
+	wsManager.StartHeartbeat()
 
 	// 初始化处理器
 	handlers.Init(r, cfg, wsManager, staticFiles)
@@ -72,10 +77,35 @@ func main() {
 	// 打印服务信息
 	printServiceInfo(cfg)
 
-	// 启动服务器
-	if err := r.Run(":" + cfg.Server.Port); err != nil {
-		log.Fatalf("❌ 服务器启动失败: %v", err)
+	// 配置 HTTP 服务器
+	srv := &http.Server{
+		Addr:    ":" + cfg.Server.Port,
+		Handler: r,
 	}
+
+	// 在 goroutine 中启动服务器，这样它就不会阻塞关闭信号的监听
+	go func() {
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Fatalf("❌ 服务器启动失败: %v", err)
+		}
+	}()
+
+	// 等待中断信号以优雅地关闭服务器（设置 5 秒的超时时间）
+	quit := make(chan os.Signal, 1)
+	// kill (no param) default send syscall.SIGTERM
+	// kill -2 is syscall.SIGINT
+	// kill -9 is syscall.SIGKILL but can't be caught, so no need to add it
+	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+	<-quit
+	log.Println("🔄 正在关闭服务器...")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := srv.Shutdown(ctx); err != nil {
+		log.Fatal("❌ 服务器强制关闭: ", err)
+	}
+
+	log.Println("✅ 服务器已成功退出")
 }
 
 // syncSecretsFromDatabase 从数据库同步密钥到配置
@@ -84,11 +114,6 @@ func syncSecretsFromDatabase(cfg *config.Config) error {
 	dbSecrets, err := secretService.GetSecrets()
 	if err != nil {
 		return err
-	}
-
-	// 确保Secrets map存在
-	if cfg.Secrets == nil {
-		cfg.Secrets = make(map[string]config.SecretConfig)
 	}
 
 	// 将数据库中的密钥同步到配置
@@ -100,7 +125,7 @@ func syncSecretsFromDatabase(cfg *config.Config) error {
 			CreatedAt:      dbSecret.CreatedAt,
 			LastUsed:       nil, // 如果需要，可以从数据库加载
 		}
-		cfg.Secrets[dbSecret.Secret] = secretConfig
+		cfg.AddSecret(dbSecret.Secret, secretConfig)
 	}
 
 	log.Printf("✅ 从数据库同步了 %d 个密钥到配置", len(dbSecrets))
@@ -112,7 +137,7 @@ func initializeDatabase() {
 	// 检查数据库文件是否存在
 	dbPath := "data/webhook_pro.db"
 	dbExists := false
-	
+
 	if _, err := os.Stat(dbPath); err == nil {
 		dbExists = true
 		fmt.Printf("📁 发现数据库文件: %s\n", dbPath)
@@ -128,7 +153,7 @@ func initializeDatabase() {
 	if err := database.InitDatabase(); err != nil {
 		log.Fatalf("❌ 数据库初始化失败: %v", err)
 	}
-	
+
 	if dbExists {
 		fmt.Println("✅ 数据库连接成功")
 	} else {
@@ -141,7 +166,7 @@ func initializeSystemConfig() {
 	// 检查配置文件是否存在
 	configPath := "configs/config.yaml"
 	configExists := false
-	
+
 	if _, err := os.Stat(configPath); err == nil {
 		configExists = true
 		fmt.Printf("📁 发现配置文件: %s\n", configPath)

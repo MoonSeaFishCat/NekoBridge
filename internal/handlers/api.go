@@ -3,14 +3,15 @@ package handlers
 import (
 	"fmt"
 	"io"
-	"net/http"
-	"os"
-	"strconv"
-	"time"
 	"nekobridge/internal/config"
 	"nekobridge/internal/database"
 	"nekobridge/internal/models"
 	"nekobridge/internal/utils"
+	"net/http"
+	"os"
+	"runtime"
+	"strconv"
+	"time"
 
 	"github.com/gin-gonic/gin"
 )
@@ -19,14 +20,14 @@ import (
 func (h *Handlers) GetLogs(c *gin.Context) {
 	limitStr := c.DefaultQuery("limit", "100")
 	level := c.Query("level")
-	
+
 	limit, err := strconv.Atoi(limitStr)
 	if err != nil {
 		limit = 100
 	}
-	
+
 	logs := h.logger.GetLogs(limit, level)
-	
+
 	c.JSON(http.StatusOK, gin.H{
 		"logs":  logs,
 		"total": h.logger.GetLogCount(),
@@ -36,7 +37,7 @@ func (h *Handlers) GetLogs(c *gin.Context) {
 // GetConnections 获取连接
 func (h *Handlers) GetConnections(c *gin.Context) {
 	connections := h.wsManager.GetConnections()
-	
+
 	c.JSON(http.StatusOK, gin.H{
 		"connections": connections,
 		"total":       len(connections),
@@ -46,7 +47,7 @@ func (h *Handlers) GetConnections(c *gin.Context) {
 // KickConnection 踢出连接
 func (h *Handlers) KickConnection(c *gin.Context) {
 	secret := c.Param("secret")
-	
+
 	if err := h.wsManager.KickConnection(secret); err != nil {
 		c.JSON(http.StatusOK, models.APIResponse{
 			Success: false,
@@ -54,11 +55,11 @@ func (h *Handlers) KickConnection(c *gin.Context) {
 		})
 		return
 	}
-	
+
 	user, _ := c.Get("user")
 	claims := user.(*utils.Claims)
 	h.logger.Log("info", "管理员踢出连接", gin.H{"secret": secret, "admin": claims.Username})
-	
+
 	c.JSON(http.StatusOK, models.APIResponse{
 		Success: true,
 		Message: "连接已断开",
@@ -76,7 +77,7 @@ func (h *Handlers) GetSecrets(c *gin.Context) {
 		})
 		return
 	}
-	
+
 	secrets := make([]models.Secret, 0, len(dbSecrets))
 	for _, dbSecret := range dbSecrets {
 		secretModel := models.Secret{
@@ -91,7 +92,7 @@ func (h *Handlers) GetSecrets(c *gin.Context) {
 		}
 		secrets = append(secrets, secretModel)
 	}
-	
+
 	c.JSON(http.StatusOK, gin.H{"secrets": secrets})
 }
 
@@ -104,14 +105,14 @@ func (h *Handlers) AddSecret(c *gin.Context) {
 		})
 		return
 	}
-	
+
 	if req.Secret == "" {
 		c.JSON(http.StatusBadRequest, models.APIResponse{
 			Error: "密钥不能为空",
 		})
 		return
 	}
-	
+
 	// 检查密钥是否已存在
 	secretService := &database.SecretService{}
 	existingSecret, err := secretService.GetSecret(req.Secret)
@@ -121,7 +122,7 @@ func (h *Handlers) AddSecret(c *gin.Context) {
 		})
 		return
 	}
-	
+
 	// 创建数据库记录
 	secretRecord := &database.Secret{
 		Secret:         req.Secret,
@@ -131,7 +132,7 @@ func (h *Handlers) AddSecret(c *gin.Context) {
 		MaxConnections: req.MaxConnections,
 		CreatedBy:      "admin", // 这里可以从JWT中获取用户名
 	}
-	
+
 	if err := secretService.CreateSecret(secretRecord); err != nil {
 		h.logger.Log("error", "创建密钥失败", gin.H{"error": err.Error()})
 		c.JSON(http.StatusInternalServerError, models.APIResponse{
@@ -139,24 +140,24 @@ func (h *Handlers) AddSecret(c *gin.Context) {
 		})
 		return
 	}
-	
+
 	// 添加到内存配置
 	secretConfig := config.SecretConfig{
 		Enabled:        req.Enabled,
 		Description:    req.Description,
 		MaxConnections: req.MaxConnections,
 	}
-	
+
 	h.config.AddSecret(req.Secret, secretConfig)
 	h.logger.Log("info", "新增密钥", gin.H{"secret": req.Secret, "description": req.Description})
-	
+
 	c.JSON(http.StatusOK, models.APIResponse{Success: true})
 }
 
 // UpdateSecret 更新密钥
 func (h *Handlers) UpdateSecret(c *gin.Context) {
 	secret := c.Param("secret")
-	
+
 	var updates config.SecretConfig
 	if err := c.ShouldBindJSON(&updates); err != nil {
 		c.JSON(http.StatusBadRequest, models.APIResponse{
@@ -164,7 +165,7 @@ func (h *Handlers) UpdateSecret(c *gin.Context) {
 		})
 		return
 	}
-	
+
 	// 更新数据库记录
 	secretService := &database.SecretService{}
 	secretRecord, err := secretService.GetSecret(secret)
@@ -174,7 +175,7 @@ func (h *Handlers) UpdateSecret(c *gin.Context) {
 		})
 		return
 	}
-	
+
 	// 更新字段
 	if updates.Description != "" {
 		secretRecord.Description = updates.Description
@@ -183,7 +184,7 @@ func (h *Handlers) UpdateSecret(c *gin.Context) {
 		secretRecord.MaxConnections = updates.MaxConnections
 	}
 	secretRecord.Enabled = updates.Enabled
-	
+
 	if err := secretService.UpdateSecret(secretRecord); err != nil {
 		h.logger.Log("error", "更新密钥失败", gin.H{"error": err.Error()})
 		c.JSON(http.StatusInternalServerError, models.APIResponse{
@@ -191,18 +192,18 @@ func (h *Handlers) UpdateSecret(c *gin.Context) {
 		})
 		return
 	}
-	
+
 	// 更新内存配置
 	h.config.UpdateSecret(secret, updates)
 	h.logger.Log("info", "更新密钥配置", gin.H{"secret": secret, "updates": updates})
-	
+
 	c.JSON(http.StatusOK, models.APIResponse{Success: true})
 }
 
 // DeleteSecret 删除密钥
 func (h *Handlers) DeleteSecret(c *gin.Context) {
 	secret := c.Param("secret")
-	
+
 	// 从数据库删除
 	secretService := &database.SecretService{}
 	if err := secretService.DeleteSecret(secret); err != nil {
@@ -212,32 +213,32 @@ func (h *Handlers) DeleteSecret(c *gin.Context) {
 		})
 		return
 	}
-	
+
 	// 从内存配置删除
 	h.config.RemoveSecret(secret)
-	
+
 	// 断开对应的WebSocket连接
 	h.wsManager.RemoveConnection(secret)
-	
+
 	h.logger.Log("info", "删除密钥", gin.H{"secret": secret})
-	
+
 	c.JSON(http.StatusOK, models.APIResponse{Success: true})
 }
 
 // BlockSecret 封禁密钥
 func (h *Handlers) BlockSecret(c *gin.Context) {
 	secret := c.Param("secret")
-	
+
 	var req struct {
 		Reason string `json:"reason"`
 	}
 	c.ShouldBindJSON(&req)
-	
+
 	// 获取当前用户
 	user, _ := c.Get("user")
 	claims := user.(*utils.Claims)
 	username := claims.Username
-	
+
 	// 检查密钥是否存在
 	secretService := &database.SecretService{}
 	secretRecord, err := secretService.GetSecret(secret)
@@ -273,16 +274,16 @@ func (h *Handlers) BlockSecret(c *gin.Context) {
 		h.logger.Log("error", "创建封禁记录失败", err)
 		// 不返回错误，因为密钥已经被禁用
 	}
-	
+
 	// 断开现有连接
 	h.wsManager.KickConnection(secret)
-	
+
 	h.logger.Log("info", "管理员封禁密钥", gin.H{
 		"secret": secret,
 		"reason": req.Reason,
 		"admin":  username,
 	})
-	
+
 	c.JSON(http.StatusOK, models.APIResponse{
 		Success: true,
 		Message: "密钥已封禁",
@@ -292,12 +293,12 @@ func (h *Handlers) BlockSecret(c *gin.Context) {
 // UnblockSecret 解除封禁
 func (h *Handlers) UnblockSecret(c *gin.Context) {
 	secret := c.Param("secret")
-	
+
 	// 获取当前用户
 	user, _ := c.Get("user")
 	claims := user.(*utils.Claims)
 	username := claims.Username
-	
+
 	// 检查密钥是否存在
 	secretService := &database.SecretService{}
 	secretRecord, err := secretService.GetSecret(secret)
@@ -326,12 +327,12 @@ func (h *Handlers) UnblockSecret(c *gin.Context) {
 		h.logger.Log("error", "解封密钥失败", err)
 		// 不返回错误，因为密钥已经被启用
 	}
-	
+
 	h.logger.Log("info", "管理员解除封禁", gin.H{
 		"secret": secret,
 		"admin":  username,
 	})
-	
+
 	c.JSON(http.StatusOK, models.APIResponse{
 		Success: true,
 		Message: "密钥封禁已解除",
@@ -362,7 +363,7 @@ func (h *Handlers) GetBlockedSecrets(c *gin.Context) {
 		if ban.Secret == "" {
 			continue
 		}
-		
+
 		blockedSecrets = append(blockedSecrets, ban.Secret)
 		unbannedBy := ""
 		if ban.UnbannedBy != nil {
@@ -491,8 +492,9 @@ func (h *Handlers) ExportSecrets(c *gin.Context) {
 	exportData := models.ExportData{
 		Secrets: make(map[string]models.Secret),
 	}
-	
-	for secret, config := range h.config.Secrets {
+
+	allSecrets := h.config.GetSecrets()
+	for secret, config := range allSecrets {
 		exportData.Secrets[secret] = models.Secret{
 			Secret:         secret,
 			Enabled:        config.Enabled,
@@ -502,18 +504,18 @@ func (h *Handlers) ExportSecrets(c *gin.Context) {
 			LastUsed:       config.LastUsed,
 		}
 	}
-	
+
 	exportData.Metadata.ExportedAt = time.Now()
 	exportData.Metadata.Version = "2.0.0"
 	exportData.Metadata.TotalSecrets = len(exportData.Secrets)
-	
+
 	user, _ := c.Get("user")
 	claims := user.(*utils.Claims)
 	h.logger.Log("info", "导出密钥数据", gin.H{
 		"admin": claims.Username,
 		"count": exportData.Metadata.TotalSecrets,
 	})
-	
+
 	c.Header("Content-Type", "application/json")
 	c.Header("Content-Disposition", "attachment; filename=secrets-export-"+strconv.FormatInt(time.Now().Unix(), 10)+".json")
 	c.JSON(http.StatusOK, exportData)
@@ -528,22 +530,22 @@ func (h *Handlers) ImportSecrets(c *gin.Context) {
 		})
 		return
 	}
-	
+
 	overwriteStr := c.DefaultQuery("overwriteExisting", "false")
 	overwriteExisting := overwriteStr == "true"
-	
+
 	result := models.ImportResult{
 		Imported: 0,
 		Skipped:  0,
 		Errors:   []string{},
 	}
-	
+
 	for secret, secretData := range req.Secrets {
-		if _, exists := h.config.Secrets[secret]; exists && !overwriteExisting {
+		if _, exists := h.config.GetSecretConfig(secret); exists && !overwriteExisting {
 			result.Skipped++
 			continue
 		}
-		
+
 		secretConfig := config.SecretConfig{
 			Enabled:        secretData.Enabled,
 			Description:    secretData.Description,
@@ -553,11 +555,11 @@ func (h *Handlers) ImportSecrets(c *gin.Context) {
 		if secretData.LastUsed != nil {
 			secretConfig.LastUsed = secretData.LastUsed
 		}
-		
+
 		h.config.AddSecret(secret, secretConfig)
 		result.Imported++
 	}
-	
+
 	user, _ := c.Get("user")
 	claims := user.(*utils.Claims)
 	h.logger.Log("info", "导入密钥数据", gin.H{
@@ -566,7 +568,7 @@ func (h *Handlers) ImportSecrets(c *gin.Context) {
 		"skipped":  result.Skipped,
 		"errors":   len(result.Errors),
 	})
-	
+
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"result":  result,
@@ -575,24 +577,25 @@ func (h *Handlers) ImportSecrets(c *gin.Context) {
 
 // GetSecretStats 获取密钥统计
 func (h *Handlers) GetSecretStats(c *gin.Context) {
+	allSecrets := h.config.GetSecrets()
 	stats := models.SecretStats{
-		Total:        len(h.config.Secrets),
+		Total:        len(allSecrets),
 		Enabled:      0,
 		Disabled:     0,
 		RecentlyUsed: 0,
 		NeverUsed:    0,
 	}
-	
+
 	now := time.Now()
 	recentThreshold := 7 * 24 * time.Hour // 7天
-	
-	for _, config := range h.config.Secrets {
+
+	for _, config := range allSecrets {
 		if config.Enabled {
 			stats.Enabled++
 		} else {
 			stats.Disabled++
 		}
-		
+
 		if config.LastUsed != nil {
 			if now.Sub(*config.LastUsed) < recentThreshold {
 				stats.RecentlyUsed++
@@ -601,7 +604,7 @@ func (h *Handlers) GetSecretStats(c *gin.Context) {
 			stats.NeverUsed++
 		}
 	}
-	
+
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"stats":   stats,
@@ -617,22 +620,22 @@ func (h *Handlers) BatchOperateSecrets(c *gin.Context) {
 		})
 		return
 	}
-	
+
 	if len(req.Secrets) == 0 {
 		c.JSON(http.StatusBadRequest, models.APIResponse{
 			Error: "请提供有效的密钥列表",
 		})
 		return
 	}
-	
+
 	result := models.BatchOperationResult{
 		Success: 0,
 		Failed:  0,
 		Errors:  []string{},
 	}
-	
+
 	secretService := &database.SecretService{}
-	
+
 	for _, secret := range req.Secrets {
 		switch req.Action {
 		case "enable":
@@ -684,7 +687,7 @@ func (h *Handlers) BatchOperateSecrets(c *gin.Context) {
 			result.Failed++
 		}
 	}
-	
+
 	user, _ := c.Get("user")
 	claims := user.(*utils.Claims)
 	h.logger.Log("info", "批量操作密钥", gin.H{
@@ -694,7 +697,7 @@ func (h *Handlers) BatchOperateSecrets(c *gin.Context) {
 		"success": result.Success,
 		"failed":  result.Failed,
 	})
-	
+
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"results": result,
@@ -715,11 +718,13 @@ func (h *Handlers) UpdateConfig(c *gin.Context) {
 		})
 		return
 	}
-	
+
 	// 备份当前配置
-	oldConfig := *h.config
-	
+	oldConfig := h.config.Clone()
+
 	// 更新配置字段
+	// 建议在整个更新过程中加锁，或者逐个字段更新
+	// 这里我们逐个字段更新，因为 h.config 的字段是导出的且可能被其他地方访问
 	if updates.Server != nil {
 		if updates.Server.Port != "" {
 			h.config.Server.Port = updates.Server.Port
@@ -734,7 +739,7 @@ func (h *Handlers) UpdateConfig(c *gin.Context) {
 			h.config.Server.CORS.Origins = updates.Server.CORS.Origins
 		}
 	}
-	
+
 	if updates.Security != nil {
 		h.config.Security.EnableSignatureValidation = updates.Security.EnableSignatureValidation
 		h.config.Security.DefaultAllowNewConnections = updates.Security.DefaultAllowNewConnections
@@ -743,7 +748,7 @@ func (h *Handlers) UpdateConfig(c *gin.Context) {
 		}
 		h.config.Security.RequireManualKeyManagement = updates.Security.RequireManualKeyManagement
 	}
-	
+
 	if updates.Auth != nil {
 		if updates.Auth.Username != "" {
 			h.config.Auth.Username = updates.Auth.Username
@@ -758,7 +763,7 @@ func (h *Handlers) UpdateConfig(c *gin.Context) {
 			h.config.Auth.JWTSecret = updates.Auth.JWTSecret
 		}
 	}
-	
+
 	if updates.Logging != nil {
 		if updates.Logging.Level != "" {
 			h.config.Logging.Level = updates.Logging.Level
@@ -771,7 +776,7 @@ func (h *Handlers) UpdateConfig(c *gin.Context) {
 			h.config.Logging.LogFilePath = updates.Logging.LogFilePath
 		}
 	}
-	
+
 	if updates.WebSocket != nil {
 		h.config.WebSocket.EnableHeartbeat = updates.WebSocket.EnableHeartbeat
 		if updates.WebSocket.HeartbeatInterval > 0 {
@@ -787,25 +792,25 @@ func (h *Handlers) UpdateConfig(c *gin.Context) {
 			h.config.WebSocket.WriteTimeout = updates.WebSocket.WriteTimeout
 		}
 	}
-	
+
 	// 保存配置到文件
 	if err := h.saveConfigToFile(); err != nil {
 		// 如果保存失败，恢复旧配置
-		*h.config = oldConfig
+		h.config.Restore(oldConfig)
 		h.logger.Log("error", "保存配置失败", err)
 		c.JSON(http.StatusInternalServerError, models.APIResponse{
 			Error: "保存配置失败",
 		})
 		return
 	}
-	
+
 	user, _ := c.Get("user")
 	claims := user.(*utils.Claims)
 	h.logger.Log("info", "配置已更新", gin.H{
 		"admin":   claims.Username,
 		"updates": updates,
 	})
-	
+
 	c.JSON(http.StatusOK, models.APIResponse{
 		Success: true,
 		Message: "配置更新成功",
@@ -815,11 +820,11 @@ func (h *Handlers) UpdateConfig(c *gin.Context) {
 // GetDashboardStats 获取仪表盘统计
 func (h *Handlers) GetDashboardStats(c *gin.Context) {
 	stats := models.DashboardStats{}
-	
+
 	// 连接统计
 	stats.Connections.Active = h.wsManager.GetConnectionCount()
 	stats.Connections.Total = len(h.config.Secrets)
-	
+
 	// 密钥统计
 	blockedCount := 0
 	for _, config := range h.config.Secrets {
@@ -829,12 +834,12 @@ func (h *Handlers) GetDashboardStats(c *gin.Context) {
 	}
 	stats.Secrets.Total = len(h.config.Secrets)
 	stats.Secrets.Blocked = blockedCount
-	
+
 	// 日志统计
 	stats.Logs.Total = h.logger.GetLogCount()
 	stats.Logs.Errors = h.logger.GetErrorCount()
 	stats.Logs.Warnings = h.logger.GetWarningCount()
-	
+
 	// 系统统计
 	stats.System.Uptime = getUptime()
 	stats.System.Memory = int(h.cpuMonitor.GetCpuUsage()) // 简化实现
@@ -843,10 +848,9 @@ func (h *Handlers) GetDashboardStats(c *gin.Context) {
 	stats.System.CPUCores = cpuInfo.Cores
 	stats.System.CPUModel = cpuInfo.Model
 	stats.System.LoadAvg = getLoadAverage()
-	
+
 	c.JSON(http.StatusOK, stats)
 }
-
 
 // GetWebConsoleStatus 获取Web控制台状态
 func (h *Handlers) GetWebConsoleStatus(c *gin.Context) {
@@ -932,7 +936,10 @@ func (h *Handlers) WebConsoleHandler(c *gin.Context) {
 // GetHealth 健康检查
 func (h *Handlers) GetHealth(c *gin.Context) {
 	cpuInfo := h.cpuMonitor.GetCpuInfo()
-	
+
+	var m runtime.MemStats
+	runtime.ReadMemStats(&m)
+
 	health := models.HealthResponse{
 		Status:    "healthy",
 		Timestamp: time.Now(),
@@ -946,13 +953,13 @@ func (h *Handlers) GetHealth(c *gin.Context) {
 			HeapReleased uint64 `json:"heap_released"`
 			HeapObjects  uint64 `json:"heap_objects"`
 		}{
-			HeapUsed:     0, // 需要实现内存统计
-			HeapTotal:    0,
-			HeapSys:      0,
-			HeapIdle:     0,
-			HeapInuse:    0,
-			HeapReleased: 0,
-			HeapObjects:  0,
+			HeapUsed:     m.Alloc,
+			HeapTotal:    m.TotalAlloc,
+			HeapSys:      m.Sys,
+			HeapIdle:     m.HeapIdle,
+			HeapInuse:    m.HeapInuse,
+			HeapReleased: m.HeapReleased,
+			HeapObjects:  m.HeapObjects,
 		},
 		CPU: struct {
 			Usage int    `json:"usage"`
@@ -967,8 +974,9 @@ func (h *Handlers) GetHealth(c *gin.Context) {
 		},
 		Connections: h.wsManager.GetConnectionCount(),
 		LoadAverage: []float64{0.0, 0.0, 0.0},
+		Version:     "2.0.0",
 	}
-	
+
 	c.JSON(http.StatusOK, health)
 }
 
@@ -979,7 +987,7 @@ func (h *Handlers) updateSecretInDatabase(secret string, enabled bool) error {
 	if err != nil {
 		return err
 	}
-	
+
 	secretRecord.Enabled = enabled
 	return secretService.UpdateSecret(secretRecord)
 }
@@ -990,7 +998,7 @@ func (h *Handlers) blockSecretInBatch(secret string) error {
 	if err := h.updateSecretInDatabase(secret, false); err != nil {
 		return err
 	}
-	
+
 	// 创建封禁记录
 	banService := &database.BanService{}
 	banRecord := &database.BanRecord{
@@ -1000,15 +1008,15 @@ func (h *Handlers) blockSecretInBatch(secret string) error {
 		BannedBy: "admin", // 这里应该从上下文获取用户
 		IsActive: true,
 	}
-	
+
 	if err := banService.CreateBanRecord(banRecord); err != nil {
 		return err
 	}
-	
+
 	// 断开连接
 	h.wsManager.RemoveConnection(secret)
 	h.config.UpdateSecret(secret, config.SecretConfig{Enabled: false})
-	
+
 	return nil
 }
 
@@ -1018,14 +1026,14 @@ func (h *Handlers) unblockSecretInBatch(secret string) error {
 	if err := h.updateSecretInDatabase(secret, true); err != nil {
 		return err
 	}
-	
+
 	// 更新封禁记录为非活跃
 	banService := &database.BanService{}
 	banRecords, err := banService.GetBanRecords()
 	if err != nil {
 		return err
 	}
-	
+
 	for _, record := range banRecords {
 		if record.Secret == secret && record.IsActive {
 			record.IsActive = false
@@ -1040,7 +1048,7 @@ func (h *Handlers) unblockSecretInBatch(secret string) error {
 			break
 		}
 	}
-	
+
 	h.config.UpdateSecret(secret, config.SecretConfig{Enabled: true})
 	return nil
 }
@@ -1055,21 +1063,21 @@ func (h *Handlers) saveConfigToFile() error {
 // GetWebSocketConfig 获取WebSocket配置
 func (h *Handlers) GetWebSocketConfig(c *gin.Context) {
 	configService := &database.ConfigService{}
-	
+
 	// 从数据库获取WebSocket配置
 	wsConfig := make(map[string]interface{})
-	
+
 	// 获取各个配置项
 	configs := []string{
 		"websocket.enable_heartbeat",
-		"websocket.heartbeat_interval", 
+		"websocket.heartbeat_interval",
 		"websocket.heartbeat_timeout",
 		"websocket.client_heartbeat_interval",
 		"websocket.max_message_size",
 		"websocket.read_timeout",
 		"websocket.write_timeout",
 	}
-	
+
 	for _, key := range configs {
 		if config, err := configService.GetConfig(key); err == nil {
 			// 根据配置类型转换值
@@ -1108,7 +1116,7 @@ func (h *Handlers) GetWebSocketConfig(c *gin.Context) {
 			}
 		}
 	}
-	
+
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"config":  wsConfig,
@@ -1124,14 +1132,14 @@ func (h *Handlers) UpdateWebSocketConfig(c *gin.Context) {
 		})
 		return
 	}
-	
+
 	configService := &database.ConfigService{}
-	
+
 	// 保存到数据库
 	for key, value := range updates {
 		configKey := "websocket." + key
 		valueStr := fmt.Sprintf("%v", value)
-		
+
 		// 确定配置类型
 		var configType string
 		switch key {
@@ -1142,22 +1150,22 @@ func (h *Handlers) UpdateWebSocketConfig(c *gin.Context) {
 		default:
 			configType = "string"
 		}
-		
+
 		if err := configService.SetConfig(configKey, valueStr, configType); err != nil {
 			h.logger.Log("error", "保存WebSocket配置失败", gin.H{"key": configKey, "error": err})
 		}
 	}
-	
+
 	// 更新内存配置
 	h.updateWebSocketConfigInMemory(updates)
-	
+
 	user, _ := c.Get("user")
 	claims := user.(*utils.Claims)
 	h.logger.Log("info", "WebSocket配置已更新", gin.H{
 		"admin":   claims.Username,
 		"updates": updates,
 	})
-	
+
 	c.JSON(http.StatusOK, models.APIResponse{
 		Success: true,
 		Message: "WebSocket配置更新成功",
@@ -1167,7 +1175,7 @@ func (h *Handlers) UpdateWebSocketConfig(c *gin.Context) {
 // GetSystemConfig 获取系统配置
 func (h *Handlers) GetSystemConfig(c *gin.Context) {
 	configService := &database.ConfigService{}
-	
+
 	// 从数据库获取所有配置
 	configs, err := configService.GetAllConfigs()
 	if err != nil {
@@ -1177,7 +1185,7 @@ func (h *Handlers) GetSystemConfig(c *gin.Context) {
 		})
 		return
 	}
-	
+
 	c.JSON(http.StatusOK, models.APIResponse{
 		Success: true,
 		Data:    configs,
@@ -1187,7 +1195,7 @@ func (h *Handlers) GetSystemConfig(c *gin.Context) {
 // GetSystemConfigSchema 获取系统配置架构
 func (h *Handlers) GetSystemConfigSchema(c *gin.Context) {
 	configService := &database.ConfigService{}
-	
+
 	// 获取配置架构
 	schema, err := configService.GetConfigSchema()
 	if err != nil {
@@ -1197,7 +1205,7 @@ func (h *Handlers) GetSystemConfigSchema(c *gin.Context) {
 		})
 		return
 	}
-	
+
 	// 添加分类显示名称
 	initializer := database.NewConfigInitializer()
 	categories := initializer.GetConfigCategories()
@@ -1208,12 +1216,12 @@ func (h *Handlers) GetSystemConfigSchema(c *gin.Context) {
 			"order":       getCategoryOrder(category),
 		}
 	}
-	
+
 	result := map[string]interface{}{
-		"schema":    schema,
+		"schema":     schema,
 		"categories": categoryInfo,
 	}
-	
+
 	c.JSON(http.StatusOK, models.APIResponse{
 		Success: true,
 		Data:    result,
@@ -1245,11 +1253,11 @@ func (h *Handlers) UpdateSystemConfig(c *gin.Context) {
 		})
 		return
 	}
-	
+
 	// 分离需要更新配置文件的设置和数据库的设置
 	fileUpdates := make(map[string]interface{})
 	dbUpdates := make(map[string]interface{})
-	
+
 	for key, value := range updates {
 		// Web控制台启用状态直接更新配置文件
 		if key == "ui.enable_web_console" {
@@ -1258,7 +1266,7 @@ func (h *Handlers) UpdateSystemConfig(c *gin.Context) {
 			dbUpdates[key] = value
 		}
 	}
-	
+
 	// 更新数据库配置（除了Web控制台启用状态）
 	if len(dbUpdates) > 0 {
 		configService := &database.ConfigService{}
@@ -1270,7 +1278,7 @@ func (h *Handlers) UpdateSystemConfig(c *gin.Context) {
 			return
 		}
 	}
-	
+
 	// 更新配置文件（Web控制台启用状态）
 	if len(fileUpdates) > 0 {
 		if err := h.updateConfigFile(fileUpdates); err != nil {
@@ -1281,17 +1289,17 @@ func (h *Handlers) UpdateSystemConfig(c *gin.Context) {
 			return
 		}
 	}
-	
+
 	// 更新内存配置
 	h.updateSystemConfigInMemory(updates)
-	
+
 	user, _ := c.Get("user")
 	claims := user.(*utils.Claims)
 	h.logger.Log("info", "系统配置已更新", gin.H{
 		"admin":   claims.Username,
 		"updates": updates,
 	})
-	
+
 	c.JSON(http.StatusOK, models.APIResponse{
 		Success: true,
 		Message: "系统配置更新成功",
@@ -1307,9 +1315,9 @@ func (h *Handlers) ResetSystemConfig(c *gin.Context) {
 		})
 		return
 	}
-	
+
 	configService := &database.ConfigService{}
-	
+
 	if err := configService.ResetConfigToDefault(key); err != nil {
 		h.logger.Log("error", "重置配置失败", gin.H{"key": key, "error": err.Error()})
 		c.JSON(http.StatusInternalServerError, models.APIResponse{
@@ -1317,14 +1325,14 @@ func (h *Handlers) ResetSystemConfig(c *gin.Context) {
 		})
 		return
 	}
-	
+
 	user, _ := c.Get("user")
 	claims := user.(*utils.Claims)
 	h.logger.Log("info", "配置已重置", gin.H{
 		"admin": claims.Username,
 		"key":   key,
 	})
-	
+
 	c.JSON(http.StatusOK, models.APIResponse{
 		Success: true,
 		Message: "配置重置成功",
@@ -1334,7 +1342,7 @@ func (h *Handlers) ResetSystemConfig(c *gin.Context) {
 // InitializeSystemConfig 初始化系统配置
 func (h *Handlers) InitializeSystemConfig(c *gin.Context) {
 	initializer := database.NewConfigInitializer()
-	
+
 	if err := initializer.InitializeDefaultConfigs(); err != nil {
 		h.logger.Log("error", "初始化系统配置失败", gin.H{"error": err.Error()})
 		c.JSON(http.StatusInternalServerError, models.APIResponse{
@@ -1342,13 +1350,13 @@ func (h *Handlers) InitializeSystemConfig(c *gin.Context) {
 		})
 		return
 	}
-	
+
 	user, _ := c.Get("user")
 	claims := user.(*utils.Claims)
 	h.logger.Log("info", "系统配置已初始化", gin.H{
 		"admin": claims.Username,
 	})
-	
+
 	c.JSON(http.StatusOK, models.APIResponse{
 		Success: true,
 		Message: "系统配置初始化成功",
@@ -1502,7 +1510,7 @@ func (h *Handlers) updateConfigFile(updates map[string]interface{}) error {
 			}
 		}
 	}
-	
+
 	// 保存配置到文件
 	return config.SaveConfig(h.config)
 }

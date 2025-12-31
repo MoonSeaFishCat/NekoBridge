@@ -199,6 +199,7 @@ type HealthResponse struct {
 	} `json:"cpu"`
 	Connections int       `json:"connections"`
 	LoadAverage []float64 `json:"load_average"`
+	Version     string    `json:"version"`
 }
 
 // ConfigUpdateRequest 配置更新请求

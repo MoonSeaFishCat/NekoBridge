@@ -58,21 +58,21 @@ func (l *Logger) Log(level, message string, details interface{}) {
 	l.printToConsole(entry)
 }
 
+var logLevels = map[string]int{
+	"debug":   0,
+	"info":    1,
+	"warning": 2,
+	"error":   3,
+}
+
 // shouldLog 检查是否应该记录此级别的日志
 func (l *Logger) shouldLog(level string) bool {
-	levels := map[string]int{
-		"debug":   0,
-		"info":    1,
-		"warning": 2,
-		"error":   3,
-	}
-
-	currentLevel, exists := levels[l.level]
+	currentLevel, exists := logLevels[l.level]
 	if !exists {
 		currentLevel = 1 // 默认为info级别
 	}
 
-	messageLevel, exists := levels[level]
+	messageLevel, exists := logLevels[level]
 	if !exists {
 		messageLevel = 1 // 默认为info级别
 	}

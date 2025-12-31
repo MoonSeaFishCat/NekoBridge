@@ -4,18 +4,18 @@ import (
 	"embed"
 	"encoding/json"
 	"fmt"
-	"io"
 	"io/fs"
-	"net/http"
-	"os"
-	"strings"
+	"log"
 	"nekobridge/internal/config"
 	"nekobridge/internal/database"
 	"nekobridge/internal/models"
 	"nekobridge/internal/monitor"
 	"nekobridge/internal/utils"
 	"nekobridge/internal/websocket"
+	"net/http"
+	"os"
 	"runtime"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -24,21 +24,24 @@ import (
 
 // Handlers 处理器结构
 type Handlers struct {
-	config         *config.Config
-	wsManager      *websocket.Manager
-	logger         *utils.Logger
-	jwtManager     *utils.JWTManager
-	signer         *utils.Ed25519Signer
-	cpuMonitor     *monitor.CpuMonitor
-	startTime      time.Time
-	staticFS       *embed.FS
+	config     *config.Config
+	wsManager  *websocket.Manager
+	logger     *utils.Logger
+	jwtManager *utils.JWTManager
+	signer     *utils.Ed25519Signer
+	cpuMonitor *monitor.CpuMonitor
+	startTime  time.Time
+	staticFS   *embed.FS
 }
 
 // NewHandlers 创建新的处理器
 func NewHandlers(cfg *config.Config, wsManager *websocket.Manager, staticFS ...embed.FS) *Handlers {
 	logger := utils.NewLogger(cfg.Logging.MaxLogEntries, cfg.Logging.Level)
 	jwtManager := utils.NewJWTManager(cfg.Auth.JWTSecret)
-	signer, _ := utils.NewEd25519Signer()
+	signer, err := utils.NewEd25519Signer()
+	if err != nil {
+		log.Printf("⚠️  无法初始化 Ed25519 签名器: %v", err)
+	}
 	cpuMonitor := monitor.NewCpuMonitor()
 
 	var fs *embed.FS
@@ -47,14 +50,14 @@ func NewHandlers(cfg *config.Config, wsManager *websocket.Manager, staticFS ...e
 	}
 
 	return &Handlers{
-		config:         cfg,
-		wsManager:      wsManager,
-		logger:         logger,
-		jwtManager:     jwtManager,
-		signer:         signer,
-		cpuMonitor:     cpuMonitor,
-		startTime:      time.Now(),
-		staticFS:       fs,
+		config:     cfg,
+		wsManager:  wsManager,
+		logger:     logger,
+		jwtManager: jwtManager,
+		signer:     signer,
+		cpuMonitor: cpuMonitor,
+		startTime:  time.Now(),
+		staticFS:   fs,
 	}
 }
 
@@ -63,60 +66,22 @@ func Init(r *gin.Engine, cfg *config.Config, wsManager *websocket.Manager, stati
 	h := NewHandlers(cfg, wsManager, staticFS...)
 	wsManager.SetConfig(cfg)
 
-	// 静态文件服务 - 优先使用嵌入文件系统
+	// 静态文件服务
 	if len(staticFS) > 0 {
-		// 使用嵌入的文件系统
 		embeddedFS := staticFS[0]
-		
-		// 创建子文件系统，只包含 web/dist 目录
 		distFS, err := fs.Sub(embeddedFS, "web/dist")
 		if err == nil {
-			// 服务静态文件
-			r.GET("/assets/*filepath", func(c *gin.Context) {
-				filePath := c.Param("filepath")
-				// 去掉开头的 "/"
-				if strings.HasPrefix(filePath, "/") {
-					filePath = filePath[1:]
-				}
-				
-				assetPath := "assets/" + filePath
-				if data, err := distFS.Open(assetPath); err == nil {
-					defer data.Close()
-					if content, err := io.ReadAll(data); err == nil {
-						// 根据文件扩展名设置正确的 Content-Type
-						if strings.HasSuffix(filePath, ".css") {
-							c.Header("Content-Type", "text/css")
-						} else if strings.HasSuffix(filePath, ".js") {
-							c.Header("Content-Type", "application/javascript")
-						}
-						c.Data(200, "", content)
-						return
-					}
-				}
-				c.Status(404)
-			})
-			
-			// 服务特定文件
+			staticHttpFS := http.FS(distFS)
+
+			// 为 /assets 提供服务
+			r.StaticFS("/assets", staticHttpFS)
+
+			// 为根目录下的特定文件提供服务
 			r.GET("/favicon.ico", func(c *gin.Context) {
-				if data, err := distFS.Open("favicon.ico"); err == nil {
-					defer data.Close()
-					if content, err := io.ReadAll(data); err == nil {
-						c.Data(200, "image/x-icon", content)
-						return
-					}
-				}
-				c.Status(404)
+				c.FileFromFS("favicon.ico", staticHttpFS)
 			})
-			
 			r.GET("/vite.svg", func(c *gin.Context) {
-				if data, err := distFS.Open("vite.svg"); err == nil {
-					defer data.Close()
-					if content, err := io.ReadAll(data); err == nil {
-						c.Data(200, "image/svg+xml", content)
-						return
-					}
-				}
-				c.Status(404)
+				c.FileFromFS("vite.svg", staticHttpFS)
 			})
 		} else {
 			// 回退到外部文件系统
@@ -130,9 +95,9 @@ func Init(r *gin.Engine, cfg *config.Config, wsManager *websocket.Manager, stati
 		r.StaticFile("/favicon.ico", "./web/dist/favicon.ico")
 		r.StaticFile("/vite.svg", "./web/dist/vite.svg")
 	}
-	
+
 	// Web控制台页面（需要检查是否启用）
-	r.GET("/", h.WebConsoleHandler)	// API路由组
+	r.GET("/", h.WebConsoleHandler) // API路由组
 	api := r.Group("/api")
 	{
 		// 健康检查
@@ -561,16 +526,9 @@ func (h *Handlers) WebSocketHandler(c *gin.Context) {
 		return
 	}
 
-	// 检查密钥是否存在
-	if _, exists := h.config.Secrets[secret]; !exists {
-		h.logger.Log("warning", "WebSocket连接被拒绝：密钥不存在", gin.H{"secret": secret})
-		c.Abort()
-		return
-	}
-
-	// 检查密钥是否被允许连接
+	// 检查密钥是否被允许连接 (包含是否存在和是否启用的逻辑)
 	if !h.config.IsSecretEnabled(secret) {
-		h.logger.Log("warning", "WebSocket连接被拒绝：密钥被禁用", gin.H{"secret": secret})
+		h.logger.Log("warning", "WebSocket连接被拒绝：密钥不存在或被禁用", gin.H{"secret": secret})
 		c.Abort()
 		return
 	}
@@ -657,9 +615,9 @@ func (h *Handlers) WebSocketHandler(c *gin.Context) {
 			// 检查二进制消息大小
 			if h.config.WebSocket.MaxBinarySize > 0 && len(data) > h.config.WebSocket.MaxBinarySize {
 				h.logger.Log("warning", "二进制消息被拒绝：超过最大大小", gin.H{
-					"secret":   secret,
-					"size":     len(data),
-					"maxSize":  h.config.WebSocket.MaxBinarySize,
+					"secret":  secret,
+					"size":    len(data),
+					"maxSize": h.config.WebSocket.MaxBinarySize,
 				})
 				continue
 			}
@@ -727,11 +685,11 @@ func (h *Handlers) handleBinaryMessage(secret string, msg models.WebSocketMessag
 
 	// 3. 默认：回显二进制数据（用于测试）
 	h.logger.Log("info", "回显二进制数据", gin.H{
-		"secret": secret,
-		"size":   len(data),
+		"secret":      secret,
+		"size":        len(data),
 		"first4bytes": fmt.Sprintf("%x", data[:min(4, len(data))]),
 	})
-	
+
 	// 回显数据
 	if err := conn.WriteMessage(gorilla.BinaryMessage, data); err != nil {
 		h.logger.Log("error", "回显二进制数据失败", err)
@@ -774,7 +732,7 @@ func (h *Handlers) handleFileUpload(secret string, fileData []byte, conn *gorill
 		},
 		Format: models.MessageFormatJSON,
 	}
-	
+
 	if err := conn.WriteJSON(response); err != nil {
 		h.logger.Log("error", "发送文件上传响应失败", err)
 	}

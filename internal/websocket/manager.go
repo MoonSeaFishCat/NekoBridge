@@ -6,9 +6,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/gorilla/websocket"
 	"nekobridge/internal/config"
 	"nekobridge/internal/models"
+
+	"github.com/gorilla/websocket"
 )
 
 // Manager WebSocket连接管理器
@@ -20,9 +21,10 @@ type Manager struct {
 
 // NewManager 创建新的WebSocket管理器
 func NewManager() *Manager {
-	return &Manager{
+	m := &Manager{
 		connections: make(map[string]*websocket.Conn),
 	}
+	return m
 }
 
 // SetConfig 设置配置
@@ -183,7 +185,7 @@ func (m *Manager) GetConnections() []models.Connection {
 		}
 
 		// 从配置中获取更多信息
-		if secretConfig, exists := m.config.Secrets[secret]; exists {
+		if secretConfig, exists := m.config.GetSecretConfig(secret); exists {
 			connection.Enabled = secretConfig.Enabled
 			connection.Description = secretConfig.Description
 			connection.CreatedAt = &secretConfig.CreatedAt
@@ -260,21 +262,22 @@ func (m *Manager) IsConnected(secret string) bool {
 
 // StartHeartbeat 启动心跳检测
 func (m *Manager) StartHeartbeat() {
-	if !m.config.WebSocket.EnableHeartbeat {
+	if m.config == nil || !m.config.WebSocket.EnableHeartbeat {
 		return
 	}
 
 	ticker := time.NewTicker(time.Duration(m.config.WebSocket.HeartbeatInterval) * time.Millisecond)
 	go func() {
 		for range ticker.C {
-			m.mu.RLock()
+			m.mu.Lock()
 			for secret, conn := range m.connections {
 				if err := conn.WriteMessage(websocket.PingMessage, nil); err != nil {
-					log.Printf("心跳发送失败 [%s]: %v", secret, err)
-					// 连接可能已断开，在下一次清理时移除
+					log.Printf("心跳发送失败，关闭连接 [%s]: %v", secret, err)
+					conn.Close()
+					delete(m.connections, secret)
 				}
 			}
-			m.mu.RUnlock()
+			m.mu.Unlock()
 		}
 	}()
 }

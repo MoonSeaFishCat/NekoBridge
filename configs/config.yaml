@@ -1,49 +1,99 @@
-auth:
-    username: admin
-    password: admin123
-    sessiontimeout: 86400
-    jwtsecret: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
-logging:
-    level: info
-    maxlogentries: 1000
-    enablefilelogging: false
-    enablelogtofile: false
-    logfilepath: ./logs/webhook.log
-secrets: {}
-security:
-    enablesignaturevalidation: true
-    defaultallownewconnections: true
-    maxconnectionspersecret: 5
-    requiremanualkeymanagement: false
-server:
-    port: "3000"
-    host: 0.0.0.0
-    mode: info
-    cors:
-        origins:
-            - '*'
-ui:
-    enablewebconsole: true
-    theme: auto
-    primarycolor: '#165DFF'
-    compactmode: false
-    language: zh-CN
-    showbreadcrumb: true
-    showfooter: true
-    enableanimation: true
-websocket:
-    enableheartbeat: false
-    heartbeatinterval: 30000
-    heartbeattimeout: 5000
-    clientheartbeatinterval: 25000
-    maxmessagesize: 65536
-    readtimeout: 60000
-    writetimeout: 10000
-    supportedformats:
-        - json
-        - text
-        - binary
-    defaultformat: json
-    enablebinarymessages: true
-    maxbinarysize: 1048576
+# NekoBridge 配置文件
 
+# 认证配置
+auth:
+  # 管理员用户名
+  username: admin
+  # 管理员密码
+  password: admin123
+  # 会话超时时间（秒），默认 86400 (24小时)
+  sessiontimeout: 86400
+  # JWT 签名密钥，建议修改为随机字符串以增强安全性
+  jwtsecret: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+
+# 日志配置
+logging:
+  # 日志级别: debug, info, warning, error
+  level: info
+  # 内存中保留的最大日志条数
+  maxlogentries: 1000
+  # 是否启用文件日志记录
+  enablefilelogging: false
+  # 是否启用日志输出到文件
+  enablelogtofile: false
+  # 日志文件保存路径
+  logfilepath: ./logs/webhook.log
+
+# 密钥配置 (动态管理，通常由程序维护)
+secrets: {}
+
+# 安全配置
+security:
+  # 是否启用签名验证 (Ed25519)
+  enablesignaturevalidation: true
+  # 是否默认允许新连接
+  defaultallownewconnections: true
+  # 每个密钥允许的最大并发 WebSocket 连接数
+  maxconnectionspersecret: 5
+  # 是否要求手动管理密钥
+  requiremanualkeymanagement: false
+
+# 服务器配置
+server:
+  # 服务监听端口
+  port: "3000"
+  # 服务监听地址
+  host: 0.0.0.0
+  # 运行模式: debug, release, test
+  mode: info
+  # 跨域配置
+  cors:
+    origins:
+      - '*'
+
+# Web 控制台界面配置
+ui:
+  # 是否启用 Web 控制台
+  enablewebconsole: true
+  # 主题模式: light, dark, auto
+  theme: auto
+  # 界面主色调
+  primarycolor: '#165DFF'
+  # 是否启用紧凑模式
+  compactmode: false
+  # 界面语言: zh-CN, en-US
+  language: zh-CN
+  # 是否显示面包屑导航
+  showbreadcrumb: true
+  # 是否显示页脚
+  showfooter: true
+  # 是否启用界面动画
+  enableanimation: true
+
+# WebSocket 配置
+websocket:
+  # 是否启用服务端心跳探测
+  enableheartbeat: false
+  # 服务端发送心跳间隔 (毫秒)
+  heartbeatinterval: 30000
+  # 心跳响应超时时间 (毫秒)
+  heartbeattimeout: 5000
+  # 客户端建议的心跳间隔 (毫秒)
+  clientheartbeatinterval: 25000
+  # 最大消息大小 (字节)，默认 64KB
+  maxmessagesize: 65536
+  # 读取超时时间 (毫秒)
+  readtimeout: 60000
+  # 写入超时时间 (毫秒)
+  writetimeout: 10000
+  # 支持的消息格式
+  supportedformats:
+    - json
+    - text
+    - binary
+  # 默认消息格式
+  defaultformat: json
+  # 是否允许二进制消息
+  enablebinarymessages: true
+  # 最大二进制消息大小 (字节)，默认 1MB
+  maxbinarysize: 1048576

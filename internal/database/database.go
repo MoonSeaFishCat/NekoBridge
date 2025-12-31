@@ -5,6 +5,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"time"
 
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
@@ -23,7 +24,7 @@ func InitDatabase() error {
 
 	// 数据库文件路径
 	dbPath := filepath.Join(dataDir, "webhook_pro.db")
-	
+
 	// 配置GORM - 禁用详细日志输出
 	config := &gorm.Config{
 		Logger: logger.Default.LogMode(logger.Silent),
@@ -44,6 +45,14 @@ func InitDatabase() error {
 	// 初始化默认数据
 	if err := initDefaultData(); err != nil {
 		return fmt.Errorf("初始化默认数据失败: %v", err)
+	}
+
+	// 配置连接池
+	sqlDB, err := DB.DB()
+	if err == nil {
+		sqlDB.SetMaxIdleConns(10)
+		sqlDB.SetMaxOpenConns(100)
+		sqlDB.SetConnMaxLifetime(time.Hour)
 	}
 
 	log.Println("数据库初始化成功")
@@ -105,7 +114,7 @@ func initDefaultData() error {
 		Enabled:     true,
 		CreatedBy:   "system",
 	}
-	
+
 	if err := DB.Create(&defaultSecret).Error; err != nil {
 		return fmt.Errorf("创建默认密钥失败: %v", err)
 	}
