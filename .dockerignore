@@ -1,0 +1,27 @@
+# Go
+bin/
+nekobridge
+*.exe
+*.test
+*.out
+
+# Node
+node_modules/
+web/frontend/node_modules/
+web/dist/
+
+# Data
+data/
+*.db
+*.db-journal
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# Docker
+Dockerfile
+docker-compose.yml
+.git/
+.gitignore

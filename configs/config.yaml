@@ -40,16 +40,33 @@ security:
 
 # 服务器配置
 server:
-  # 服务监听端口
-  port: "3000"
-  # 服务监听地址
-  host: 0.0.0.0
-  # 运行模式: debug, release, test
-  mode: info
+    # 服务监听端口
+    port: "15141"
+    # 服务监听地址
+    host: 0.0.0.0
+    # 绑定的域名 (用于界面显示和强制检查)
+    domain: ""
+    # 是否强制检查域名访问 (启用后，非指定域名访问将被拦截)
+    enforce_domain: false
+    # 受信任的代理 IP (用于反向代理环境下获取真实客户端 IP)
+    # 如果通过宝塔/Nginx 转发，请保持默认或添加代理服务器 IP
+    trusted_proxies:
+        - 127.0.0.1
+        - ::1
+    # 运行模式: debug, release, test
+    mode: debug
   # 跨域配置
   cors:
     origins:
       - '*'
+  # SSL/TLS 配置 (用于直接开启 HTTPS/WSS)
+  ssl:
+    # 是否启用 SSL
+    enabled: false
+    # 证书文件路径 (例如: ./certs/server.crt)
+    cert: ""
+    # 私钥文件路径 (例如: ./certs/server.key)
+    key: ""
 
 # Web 控制台界面配置
 ui:

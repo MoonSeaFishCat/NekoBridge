@@ -63,8 +63,12 @@ func main() {
 	corsConfig.AllowHeaders = []string{"Origin", "Content-Length", "Content-Type", "Authorization"}
 	r.Use(cors.New(corsConfig))
 
-	// 设置受信任的代理（解决GIN警告）
-	r.SetTrustedProxies([]string{"127.0.0.1", "::1"})
+	// 设置受信任的代理（解决GIN警告并支持获取真实IP）
+	if len(cfg.Server.TrustedProxies) > 0 {
+		r.SetTrustedProxies(cfg.Server.TrustedProxies)
+	} else {
+		r.SetTrustedProxies([]string{"127.0.0.1", "::1"})
+	}
 
 	// 初始化WebSocket管理器
 	wsManager := websocket.NewManager()
@@ -83,10 +87,20 @@ func main() {
 		Handler: r,
 	}
 
-	// 在 goroutine 中启动服务器，这样它就不会阻塞关闭信号的监听
+	// 在 goroutine 中启动服务器
 	go func() {
-		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Fatalf("❌ 服务器启动失败: %v", err)
+		if cfg.Server.SSL.Enabled {
+			if cfg.Server.SSL.Cert == "" || cfg.Server.SSL.Key == "" {
+				log.Fatalf("❌ SSL 已启用，但未配置证书文件路径 (cert/key)")
+			}
+			fmt.Printf("🔒 SSL 已启用，正在通过 HTTPS 启动服务...\n")
+			if err := srv.ListenAndServeTLS(cfg.Server.SSL.Cert, cfg.Server.SSL.Key); err != nil && err != http.ErrServerClosed {
+				log.Fatalf("❌ 服务器 (HTTPS) 启动失败: %v", err)
+			}
+		} else {
+			if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+				log.Fatalf("❌ 服务器 启动失败: %v", err)
+			}
 		}
 	}()
 
@@ -203,12 +217,24 @@ func printStartupBanner() {
 
 // printServiceInfo 打印服务信息
 func printServiceInfo(cfg *config.Config) {
+	protocol := "http"
+	wsProtocol := "ws"
+	if cfg.Server.SSL.Enabled {
+		protocol = "https"
+		wsProtocol = "wss"
+	}
+
+	host := "localhost"
+	if cfg.Server.Domain != "" {
+		host = cfg.Server.Domain
+	}
+
 	fmt.Println("🚀 服务启动成功！")
 	fmt.Println()
 	fmt.Println("📋 服务信息:")
-	fmt.Printf("   🌐 Web管理界面: http://localhost:%s\n", cfg.Server.Port)
-	fmt.Printf("   🪝 Webhook接口: http://localhost:%s/api/webhook?secret=YOUR_SECRET\n", cfg.Server.Port)
-	fmt.Printf("   📡 WebSocket地址: ws://localhost:%s/ws/YOUR_SECRET\n", cfg.Server.Port)
+	fmt.Printf("   🌐 Web管理界面: %s://%s:%s\n", protocol, host, cfg.Server.Port)
+	fmt.Printf("   🪝 Webhook接口: %s://%s:%s/api/webhook?secret=YOUR_SECRET\n", protocol, host, cfg.Server.Port)
+	fmt.Printf("   📡 WebSocket地址: %s://%s:%s/ws/YOUR_SECRET\n", wsProtocol, host, cfg.Server.Port)
 	fmt.Println()
 	fmt.Println("🔧 配置信息:")
 

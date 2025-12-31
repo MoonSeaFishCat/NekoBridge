@@ -23,10 +23,21 @@ type Config struct {
 
 // ServerConfig 服务器配置
 type ServerConfig struct {
-	Port string     `mapstructure:"port"`
-	Host string     `mapstructure:"host"`
-	Mode string     `mapstructure:"mode"`
-	CORS CORSConfig `mapstructure:"cors"`
+	Port           string     `mapstructure:"port"`
+	Host           string     `mapstructure:"host"`
+	Domain         string     `mapstructure:"domain"`          // 绑定的域名
+	EnforceDomain  bool       `mapstructure:"enforce_domain"`  // 是否强制检查域名访问
+	TrustedProxies []string   `mapstructure:"trusted_proxies"` // 受信任的代理 IP 列表
+	Mode           string     `mapstructure:"mode"`
+	CORS           CORSConfig `mapstructure:"cors"`
+	SSL            SSLConfig  `mapstructure:"ssl"`
+}
+
+// SSLConfig SSL配置
+type SSLConfig struct {
+	Enabled bool   `mapstructure:"enabled"`
+	Cert    string `mapstructure:"cert"`
+	Key     string `mapstructure:"key"`
 }
 
 // CORSConfig CORS配置
@@ -200,8 +211,14 @@ func Load() (*Config, error) {
 func setDefaults() {
 	viper.SetDefault("server.port", defaultConfig.Server.Port)
 	viper.SetDefault("server.host", defaultConfig.Server.Host)
+	viper.SetDefault("server.domain", "")
+	viper.SetDefault("server.enforce_domain", false)
+	viper.SetDefault("server.trusted_proxies", []string{"127.0.0.1", "::1"})
 	viper.SetDefault("server.mode", defaultConfig.Server.Mode)
 	viper.SetDefault("server.cors.origins", defaultConfig.Server.CORS.Origins)
+	viper.SetDefault("server.ssl.enabled", false)
+	viper.SetDefault("server.ssl.cert", "")
+	viper.SetDefault("server.ssl.key", "")
 
 	viper.SetDefault("security.enable_signature_validation", defaultConfig.Security.EnableSignatureValidation)
 	viper.SetDefault("security.default_allow_new_connections", defaultConfig.Security.DefaultAllowNewConnections)

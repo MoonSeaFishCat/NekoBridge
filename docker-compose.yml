@@ -1,0 +1,12 @@
+services:
+  nekobridge:
+    build: .
+    container_name: nekobridge
+    ports:
+      - "15141:15141"
+    volumes:
+      - ./data:/app/data
+      - ./configs:/app/configs
+    restart: always
+    environment:
+      - TZ=Asia/Shanghai

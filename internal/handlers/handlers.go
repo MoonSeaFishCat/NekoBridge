@@ -66,12 +66,14 @@ func Init(r *gin.Engine, cfg *config.Config, wsManager *websocket.Manager, stati
 	h := NewHandlers(cfg, wsManager, staticFS...)
 	wsManager.SetConfig(cfg)
 
+	// 应用域名绑定中间件 (如果启用)
+	r.Use(h.DomainMiddleware())
+
 	// 静态文件服务
 	if len(staticFS) > 0 {
 		embeddedFS := staticFS[0]
 
 		// 1. 为 /assets 路径提供服务
-		// 前端打包后的文件在 web/dist/assets 下，URL 引用也是 /assets/xxx
 		assetsFS, err := fs.Sub(embeddedFS, "web/dist/assets")
 		if err == nil {
 			r.StaticFS("/assets", http.FS(assetsFS))
@@ -86,6 +88,18 @@ func Init(r *gin.Engine, cfg *config.Config, wsManager *websocket.Manager, stati
 			})
 			r.GET("/vite.svg", func(c *gin.Context) {
 				c.FileFromFS("vite.svg", staticHttpFS)
+			})
+
+			// 3. SPA 伪静态处理：任何不匹配 API 或 静态资源的路由都返回 index.html
+			r.NoRoute(func(c *gin.Context) {
+				// 如果是 API 请求或 WebSocket 请求，不要返回 index.html，而是返回 404
+				path := c.Request.URL.Path
+				if strings.HasPrefix(path, "/api") || strings.HasPrefix(path, "/ws") {
+					c.JSON(http.StatusNotFound, gin.H{"error": "Not Found"})
+					return
+				}
+				// 否则返回 index.html
+				c.FileFromFS("index.html", staticHttpFS)
 			})
 		}
 	}
@@ -121,6 +135,9 @@ func Init(r *gin.Engine, cfg *config.Config, wsManager *websocket.Manager, stati
 
 	api := r.Group("/api")
 	{
+		// 代理调试接口
+		api.GET("/proxy-check", h.ProxyCheck)
+
 		// 健康检查
 		api.GET("/health", h.HealthCheck)
 		api.GET("/", h.APIInfo)
@@ -188,6 +205,34 @@ func Init(r *gin.Engine, cfg *config.Config, wsManager *websocket.Manager, stati
 	r.GET("/ws/:secret", h.WebSocketHandler)
 }
 
+// DomainMiddleware 域名检查中间件
+func (h *Handlers) DomainMiddleware() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if h.config.Server.EnforceDomain && h.config.Server.Domain != "" {
+			host := c.Request.Host
+			// 移除端口号
+			if strings.Contains(host, ":") {
+				host = strings.Split(host, ":")[0]
+			}
+
+			if host != h.config.Server.Domain {
+				h.logger.Log("warning", "非法域名访问被拦截", gin.H{
+					"request_host": host,
+					"bound_domain": h.config.Server.Domain,
+					"path":         c.Request.URL.Path,
+				})
+				c.JSON(http.StatusForbidden, models.APIResponse{
+					Success: false,
+					Error:   "Access denied: domain mismatch",
+				})
+				c.Abort()
+				return
+			}
+		}
+		c.Next()
+	}
+}
+
 // AuthMiddleware 认证中间件
 func (h *Handlers) AuthMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
@@ -232,6 +277,26 @@ func (h *Handlers) APIInfo(c *gin.Context) {
 			"signature_validation": h.config.Security.EnableSignatureValidation,
 			"max_connections":      h.config.Security.MaxConnectionsPerSecret,
 		},
+	})
+}
+
+// ProxyCheck 代理调试接口
+func (h *Handlers) ProxyCheck(c *gin.Context) {
+	headers := make(map[string]string)
+	for k, v := range c.Request.Header {
+		if len(v) > 0 {
+			headers[k] = v[0]
+		}
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"client_ip":       c.ClientIP(),
+		"remote_addr":     c.Request.RemoteAddr,
+		"host":            c.Request.Host,
+		"proto":           c.Request.Proto,
+		"request_uri":     c.Request.RequestURI,
+		"headers":         headers,
+		"trusted_proxies": h.config.Server.TrustedProxies,
 	})
 }
 
@@ -567,12 +632,22 @@ func (h *Handlers) WebSocketHandler(c *gin.Context) {
 		"writeTimeout":   h.config.WebSocket.WriteTimeout,
 	})
 
+	// 确保缓冲区大小不为 0
+	readBufferSize := h.config.WebSocket.MaxMessageSize
+	if readBufferSize <= 0 {
+		readBufferSize = 4096 // 默认 4KB
+	}
+	writeBufferSize := h.config.WebSocket.MaxMessageSize
+	if writeBufferSize <= 0 {
+		writeBufferSize = 4096 // 默认 4KB
+	}
+
 	upgrader := gorilla.Upgrader{
 		CheckOrigin: func(r *http.Request) bool {
 			return true // 允许所有来源
 		},
-		ReadBufferSize:  h.config.WebSocket.MaxMessageSize,
-		WriteBufferSize: h.config.WebSocket.MaxMessageSize,
+		ReadBufferSize:  readBufferSize,
+		WriteBufferSize: writeBufferSize,
 	}
 
 	conn, err := upgrader.Upgrade(c.Writer, c.Request, nil)

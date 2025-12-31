@@ -16,6 +16,7 @@ import (
 type Manager struct {
 	connections map[string]*websocket.Conn
 	mu          sync.RWMutex
+	writeMus    map[string]*sync.Mutex // 每个连接独立的写锁，防止并发写导致连接关闭或消息丢失
 	config      *config.Config
 }
 
@@ -23,6 +24,7 @@ type Manager struct {
 func NewManager() *Manager {
 	m := &Manager{
 		connections: make(map[string]*websocket.Conn),
+		writeMus:    make(map[string]*sync.Mutex),
 	}
 	return m
 }
@@ -52,6 +54,7 @@ func (m *Manager) AddConnection(secret string, conn *websocket.Conn) error {
 	}
 
 	m.connections[secret] = conn
+	m.writeMus[secret] = &sync.Mutex{}
 	log.Printf("WebSocket连接已建立: %s (当前总连接数: %d)", secret, len(m.connections))
 
 	// 发送连接确认
@@ -78,6 +81,7 @@ func (m *Manager) RemoveConnection(secret string) {
 	if conn, exists := m.connections[secret]; exists {
 		conn.Close()
 		delete(m.connections, secret)
+		delete(m.writeMus, secret)
 		log.Printf("WebSocket连接已从管理器移除: %s (剩余连接数: %d)", secret, len(m.connections))
 	} else {
 		log.Printf("尝试移除不存在的WebSocket连接: %s", secret)
@@ -111,10 +115,18 @@ func (m *Manager) Broadcast(message models.WebSocketMessage) {
 
 // sendMessage 发送消息的内部方法
 func (m *Manager) sendMessage(secret string, message models.WebSocketMessage) error {
+	m.mu.RLock()
 	conn, exists := m.connections[secret]
-	if !exists {
+	writeMu, muExists := m.writeMus[secret]
+	m.mu.RUnlock()
+
+	if !exists || !muExists {
 		return ErrConnectionNotFound
 	}
+
+	// 使用连接专用的写锁，确保同一连接的消息按顺序发送且不发生并发写冲突
+	writeMu.Lock()
+	defer writeMu.Unlock()
 
 	var err error
 	// 根据消息格式选择发送方式
@@ -153,6 +165,8 @@ func (m *Manager) sendMessage(secret string, message models.WebSocketMessage) er
 
 	if err != nil {
 		log.Printf("消息发送失败 [%s] (类型: %s, 格式: %s): %v", secret, message.Type, message.Format, err)
+		// 如果发送失败，尝试移除失效连接
+		go m.RemoveConnection(secret)
 		return err
 	}
 
@@ -162,26 +176,32 @@ func (m *Manager) sendMessage(secret string, message models.WebSocketMessage) er
 // SendBinaryMessage 发送二进制消息
 func (m *Manager) SendBinaryMessage(secret string, data []byte) error {
 	m.mu.RLock()
-	defer m.mu.RUnlock()
-
 	conn, exists := m.connections[secret]
-	if !exists {
+	writeMu, muExists := m.writeMus[secret]
+	m.mu.RUnlock()
+
+	if !exists || !muExists {
 		return ErrConnectionNotFound
 	}
 
+	writeMu.Lock()
+	defer writeMu.Unlock()
 	return conn.WriteMessage(websocket.BinaryMessage, data)
 }
 
 // SendTextMessage 发送文本消息
 func (m *Manager) SendTextMessage(secret string, text string) error {
 	m.mu.RLock()
-	defer m.mu.RUnlock()
-
 	conn, exists := m.connections[secret]
-	if !exists {
+	writeMu, muExists := m.writeMus[secret]
+	m.mu.RUnlock()
+
+	if !exists || !muExists {
 		return ErrConnectionNotFound
 	}
 
+	writeMu.Lock()
+	defer writeMu.Unlock()
 	return conn.WriteMessage(websocket.TextMessage, []byte(text))
 }
 
