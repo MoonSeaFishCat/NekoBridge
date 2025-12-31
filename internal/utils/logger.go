@@ -21,6 +21,8 @@ type Logger struct {
 
 // NewLogger 创建新的日志记录器
 func NewLogger(maxSize int, level string) *Logger {
+	// 设置标准日志库输出到 stdout，确保在宝塔等环境下能看到所有日志
+	log.SetOutput(os.Stdout)
 	return &Logger{
 		logs:    make([]models.LogEntry, 0),
 		maxSize: maxSize,
@@ -83,7 +85,7 @@ func (l *Logger) shouldLog(level string) bool {
 // printToConsole 输出到控制台
 func (l *Logger) printToConsole(entry models.LogEntry) {
 	timestamp := entry.Timestamp.Format("2006-01-02 15:04:05")
-	
+
 	if entry.Details != nil {
 		detailsJSON, _ := json.Marshal(entry.Details)
 		log.Printf("[%s] %s %s %s", timestamp, entry.Level, entry.Message, string(detailsJSON))
@@ -178,16 +180,16 @@ func (l *Logger) SaveToFile(filename string) error {
 	defer file.Close()
 
 	for _, entry := range l.logs {
-		line := fmt.Sprintf("[%s] %s %s\n", 
+		line := fmt.Sprintf("[%s] %s %s\n",
 			entry.Timestamp.Format("2006-01-02 15:04:05"),
 			entry.Level,
 			entry.Message)
-		
+
 		if entry.Details != nil {
 			detailsJSON, _ := json.Marshal(entry.Details)
 			line += fmt.Sprintf("  Details: %s\n", string(detailsJSON))
 		}
-		
+
 		file.WriteString(line)
 	}
 

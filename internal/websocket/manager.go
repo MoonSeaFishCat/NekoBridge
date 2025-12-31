@@ -38,17 +38,21 @@ func (m *Manager) AddConnection(secret string, conn *websocket.Conn) error {
 	defer m.mu.Unlock()
 
 	// 检查连接数限制
-	if len(m.connections) >= m.config.Security.MaxConnectionsPerSecret {
+	currentCount := len(m.connections)
+	if currentCount >= m.config.Security.MaxConnectionsPerSecret {
+		log.Printf("WebSocket连接拒绝 [%s]: 达到最大连接数限制 (%d/%d)", secret, currentCount, m.config.Security.MaxConnectionsPerSecret)
 		return ErrMaxConnectionsReached
 	}
 
 	// 关闭旧连接
 	if oldConn, exists := m.connections[secret]; exists {
+		log.Printf("WebSocket连接 [%s] 已存在，正在关闭旧连接", secret)
+		oldConn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseServiceRestart, "新连接已建立，关闭旧连接"))
 		oldConn.Close()
 	}
 
 	m.connections[secret] = conn
-	log.Printf("WebSocket连接已建立: %s", secret)
+	log.Printf("WebSocket连接已建立: %s (当前总连接数: %d)", secret, len(m.connections))
 
 	// 发送连接确认
 	message := models.WebSocketMessage{
@@ -59,7 +63,11 @@ func (m *Manager) AddConnection(secret string, conn *websocket.Conn) error {
 		},
 	}
 
-	return m.sendMessage(secret, message)
+	if err := m.sendMessage(secret, message); err != nil {
+		log.Printf("发送连接确认消息失败 [%s]: %v", secret, err)
+	}
+
+	return nil
 }
 
 // RemoveConnection 移除连接
@@ -70,7 +78,9 @@ func (m *Manager) RemoveConnection(secret string) {
 	if conn, exists := m.connections[secret]; exists {
 		conn.Close()
 		delete(m.connections, secret)
-		log.Printf("WebSocket连接已关闭: %s", secret)
+		log.Printf("WebSocket连接已从管理器移除: %s (剩余连接数: %d)", secret, len(m.connections))
+	} else {
+		log.Printf("尝试移除不存在的WebSocket连接: %s", secret)
 	}
 }
 
@@ -106,34 +116,47 @@ func (m *Manager) sendMessage(secret string, message models.WebSocketMessage) er
 		return ErrConnectionNotFound
 	}
 
+	var err error
 	// 根据消息格式选择发送方式
 	switch message.Format {
 	case models.MessageFormatBinary:
 		// 发送二进制数据
 		if message.Raw != nil {
-			return conn.WriteMessage(websocket.BinaryMessage, message.Raw)
+			err = conn.WriteMessage(websocket.BinaryMessage, message.Raw)
+		} else {
+			err = conn.WriteMessage(websocket.BinaryMessage, []byte{})
 		}
-		return conn.WriteMessage(websocket.BinaryMessage, []byte{})
 
 	case models.MessageFormatText:
 		// 发送纯文本数据
 		if message.Data != nil {
 			if text, ok := message.Data.(string); ok {
-				return conn.WriteMessage(websocket.TextMessage, []byte(text))
+				err = conn.WriteMessage(websocket.TextMessage, []byte(text))
+			} else {
+				err = conn.WriteMessage(websocket.TextMessage, []byte{})
 			}
+		} else {
+			err = conn.WriteMessage(websocket.TextMessage, []byte{})
 		}
-		return conn.WriteMessage(websocket.TextMessage, []byte{})
 
 	case models.MessageFormatJSON:
 		fallthrough
 	default:
 		// 默认使用JSON格式
-		data, err := json.Marshal(message)
-		if err != nil {
-			return err
+		data, errMarshal := json.Marshal(message)
+		if errMarshal != nil {
+			log.Printf("JSON序列化失败 [%s]: %v", secret, errMarshal)
+			return errMarshal
 		}
-		return conn.WriteMessage(websocket.TextMessage, data)
+		err = conn.WriteMessage(websocket.TextMessage, data)
 	}
+
+	if err != nil {
+		log.Printf("消息发送失败 [%s] (类型: %s, 格式: %s): %v", secret, message.Type, message.Format, err)
+		return err
+	}
+
+	return nil
 }
 
 // SendBinaryMessage 发送二进制消息

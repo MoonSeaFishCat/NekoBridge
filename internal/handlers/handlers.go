@@ -541,6 +541,8 @@ func (h *Handlers) broadcastSecretUpdate(eventType, secret string) {
 // WebSocketHandler WebSocket处理器
 func (h *Handlers) WebSocketHandler(c *gin.Context) {
 	secret := c.Param("secret")
+	h.logger.Log("info", "收到 WebSocket 连接请求", gin.H{"secret": secret})
+
 	if secret == "" {
 		h.logger.Log("error", "WebSocket连接缺少密钥", nil)
 		c.Abort()
@@ -548,13 +550,23 @@ func (h *Handlers) WebSocketHandler(c *gin.Context) {
 	}
 
 	// 检查密钥是否被允许连接 (包含是否存在和是否启用的逻辑)
-	if !h.config.IsSecretEnabled(secret) {
+	enabled := h.config.IsSecretEnabled(secret)
+	h.logger.Log("debug", "检查密钥启用状态", gin.H{"secret": secret, "enabled": enabled})
+
+	if !enabled {
 		h.logger.Log("warning", "WebSocket连接被拒绝：密钥不存在或被禁用", gin.H{"secret": secret})
 		c.Abort()
 		return
 	}
 
 	// 升级为WebSocket连接
+	h.logger.Log("debug", "正在升级 WebSocket 连接", gin.H{
+		"secret":         secret,
+		"maxMessageSize": h.config.WebSocket.MaxMessageSize,
+		"readTimeout":    h.config.WebSocket.ReadTimeout,
+		"writeTimeout":   h.config.WebSocket.WriteTimeout,
+	})
+
 	upgrader := gorilla.Upgrader{
 		CheckOrigin: func(r *http.Request) bool {
 			return true // 允许所有来源
@@ -565,9 +577,10 @@ func (h *Handlers) WebSocketHandler(c *gin.Context) {
 
 	conn, err := upgrader.Upgrade(c.Writer, c.Request, nil)
 	if err != nil {
-		h.logger.Log("error", "WebSocket升级失败", err)
+		h.logger.Log("error", "WebSocket升级失败", gin.H{"secret": secret, "error": err.Error()})
 		return
 	}
+	h.logger.Log("info", "WebSocket 升级成功", gin.H{"secret": secret})
 	defer conn.Close()
 
 	// 设置读写超时
@@ -579,11 +592,16 @@ func (h *Handlers) WebSocketHandler(c *gin.Context) {
 	}
 
 	// 添加到连接管理器
+	h.logger.Log("debug", "正在将连接添加到管理器", gin.H{"secret": secret})
 	if err := h.wsManager.AddConnection(secret, conn); err != nil {
-		h.logger.Log("error", "添加WebSocket连接失败", err)
+		h.logger.Log("error", "添加WebSocket连接失败", gin.H{"secret": secret, "error": err.Error()})
 		return
 	}
-	defer h.wsManager.RemoveConnection(secret)
+	h.logger.Log("info", "WebSocket 连接已成功注册到管理器", gin.H{"secret": secret})
+	defer func() {
+		h.logger.Log("info", "正在从管理器移除 WebSocket 连接", gin.H{"secret": secret})
+		h.wsManager.RemoveConnection(secret)
+	}()
 
 	// 处理WebSocket消息
 	for {
@@ -591,7 +609,9 @@ func (h *Handlers) WebSocketHandler(c *gin.Context) {
 		messageType, data, err := conn.ReadMessage()
 		if err != nil {
 			if gorilla.IsUnexpectedCloseError(err, gorilla.CloseGoingAway, gorilla.CloseAbnormalClosure) {
-				h.logger.Log("error", "WebSocket读取错误", err)
+				h.logger.Log("error", "WebSocket读取错误", gin.H{"secret": secret, "error": err.Error()})
+			} else {
+				h.logger.Log("info", "WebSocket 连接正常关闭", gin.H{"secret": secret, "error": err.Error()})
 			}
 			break
 		}

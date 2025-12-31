@@ -243,6 +243,12 @@ func customLogger() gin.HandlerFunc {
 		}
 
 		start := time.Now()
+
+		// 如果是 WebSocket 请求，先打印一条开始日志
+		if strings.HasPrefix(urlPath, "/ws/") {
+			fmt.Printf("[🆕] 🔗 WebSocket 握手请求: %s %s\n", c.Request.Method, urlPath)
+		}
+
 		c.Next()
 		end := time.Now()
 		latency := end.Sub(start)
