@@ -891,6 +891,7 @@ func (h *Handlers) WebConsoleHandler(c *gin.Context) {
 
 	// 尝试从嵌入的文件系统返回React前端
 	if h.staticFS != nil {
+		// 直接尝试在嵌入文件系统中打开 web/dist/index.html
 		if indexFile, err := h.staticFS.Open("web/dist/index.html"); err == nil {
 			defer indexFile.Close()
 			if content, err := io.ReadAll(indexFile); err == nil {
