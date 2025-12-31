@@ -69,16 +69,18 @@ func Init(r *gin.Engine, cfg *config.Config, wsManager *websocket.Manager, stati
 	// 静态文件服务
 	if len(staticFS) > 0 {
 		embeddedFS := staticFS[0]
-		// 注意：fs.Sub 得到的 distFS 根目录就是 web/dist
+
+		// 1. 为 /assets 路径提供服务
+		// 前端打包后的文件在 web/dist/assets 下，URL 引用也是 /assets/xxx
+		assetsFS, err := fs.Sub(embeddedFS, "web/dist/assets")
+		if err == nil {
+			r.StaticFS("/assets", http.FS(assetsFS))
+		}
+
+		// 2. 为根目录下的特定文件提供服务
 		distFS, err := fs.Sub(embeddedFS, "web/dist")
 		if err == nil {
 			staticHttpFS := http.FS(distFS)
-
-			// 为 /assets 提供服务
-			// 注意：前端 index.html 引用的是 ./assets/xxx，在根路径访问时就是 /assets/xxx
-			r.StaticFS("/assets", staticHttpFS)
-
-			// 为根目录下的特定文件提供服务
 			r.GET("/favicon.ico", func(c *gin.Context) {
 				c.FileFromFS("favicon.ico", staticHttpFS)
 			})
@@ -88,18 +90,32 @@ func Init(r *gin.Engine, cfg *config.Config, wsManager *websocket.Manager, stati
 		}
 	}
 
-	// 使用外部文件系统作为备选（如果 embed 中没找到文件）
-	r.Static("/static_assets", "./web/dist/assets") // 仅作备份
+	// 使用外部文件系统作为备选
+	if _, err := os.Stat("./web/dist/assets"); err == nil {
+		r.Static("/static_assets", "./web/dist/assets")
+	}
 
 	// Web控制台页面（SPA 路由支持）
 	r.GET("/", h.WebConsoleHandler)
+
 	// 处理前端路由：如果找不到路由且不是 API 请求，则返回 index.html
 	r.NoRoute(func(c *gin.Context) {
-		if strings.HasPrefix(c.Request.URL.Path, "/api") {
+		path := c.Request.URL.Path
+
+		// 如果是 API 请求，返回 404
+		if strings.HasPrefix(path, "/api") {
 			c.JSON(http.StatusNotFound, gin.H{"error": "API route not found"})
 			return
 		}
-		// 否则调用 WebConsoleHandler 返回 index.html
+
+		// 如果是静态资源请求但没找到（通常带有点号），不应该返回 index.html
+		// 否则会导致浏览器尝试将 HTML 解析为 JS (MIME type error)
+		if strings.Contains(path, ".") || strings.HasPrefix(path, "/assets") {
+			c.Status(http.StatusNotFound)
+			return
+		}
+
+		// 否则调用 WebConsoleHandler 返回 index.html，让前端路由接管
 		h.WebConsoleHandler(c)
 	})
 

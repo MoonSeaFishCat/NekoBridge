@@ -1,108 +1,68 @@
 #!/bin/bash
 
-# NekoBridge 构建脚本
-# 用法: ./build.sh [版本号]
-# 例如: ./build.sh v1.0.0
+# NekoBridge Linux amd64 构建脚本
 
-set -e
+# 颜色定义
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+RED='\033[0;31m'
+NC='\033[0m' # 无颜色
 
-VERSION=${1:-"dev"}
-BUILD_DIR="build"
-DIST_DIR="dist"
+echo -e "${YELLOW}� 开始构建 NekoBridge (Linux amd64)...${NC}"
 
-echo "🐱 NekoBridge 构建脚本"
-echo "版本: $VERSION"
-
-# 清理构建目录
-echo "🧹 清理构建目录..."
-rm -rf $BUILD_DIR $DIST_DIR
-mkdir -p $BUILD_DIR $DIST_DIR
-
-# 检查 pnpm
-if ! command -v pnpm &> /dev/null; then
-    echo "❌ pnpm 未安装，请先安装 pnpm"
-    echo "npm install -g pnpm"
-    exit 1
+# 1. 前端构建
+echo -e "${YELLOW}📦 正在构建前端...${NC}"
+cd web/frontend
+if [ -f "pnpm-lock.yaml" ]; then
+    pnpm install && pnpm build
+elif [ -f "yarn.lock" ]; then
+    yarn install && yarn build
+else
+    npm install && npm run build
 fi
 
-# 构建前端
-echo "🔨 构建前端..."
-cd web/frontend
-pnpm install
-pnpm build
+if [ $? -ne 0 ]; then
+    echo -e "${RED}❌ 前端构建失败！${NC}"
+    exit 1
+fi
 cd ../..
 
-# 复制前端构建文件
-echo "📁 复制前端文件..."
+# 2. 准备静态资源目录
+echo -e "${YELLOW}� 正在同步静态资源...${NC}"
 mkdir -p web/dist
 cp -r web/frontend/dist/* web/dist/
 
-# 构建后端 - Linux
-echo "🐧 构建 Linux 版本..."
-GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="-w -s" -o $BUILD_DIR/nekobridge-linux-amd64
+# 3. 后端构建 (交叉编译)
+echo -e "${YELLOW}� 正在构建后端 (Linux amd64)...${NC}"
+export GOOS=linux
+export GOARCH=amd64
+export CGO_ENABLED=1 # 注意：SQLite 需要 CGO。如果交叉编译报错，请确保已安装 gcc-multilib
 
-# 构建后端 - Windows
-echo "🪟 构建 Windows 版本..."
-GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="-w -s" -o $BUILD_DIR/nekobridge-windows-amd64.exe
+# 设置构建版本号和时间
+VERSION="2.0.0"
+BUILD_TIME=$(date "+%Y-%m-%d %H:%M:%S")
+LDFLAGS="-X 'main.Version=${VERSION}' -X 'main.BuildTime=${BUILD_TIME}' -s -w"
 
-# 创建发布包 - Linux
-echo "📦 创建 Linux 发布包..."
-LINUX_DIR="$DIST_DIR/nekobridge-linux-amd64"
-mkdir -p $LINUX_DIR
-cp $BUILD_DIR/nekobridge-linux-amd64 $LINUX_DIR/nekobridge
-cp -r configs $LINUX_DIR/
-cp -r web $LINUX_DIR/
-cp README.md $LINUX_DIR/
+go build -ldflags "$LDFLAGS" -o bin/nekobridge-linux-amd64 main.go
 
-# 创建启动脚本 - Linux
-cat > $LINUX_DIR/start.sh << 'EOF'
-#!/bin/bash
-echo "🐱 启动 NekoBridge..."
-./nekobridge
-EOF
-chmod +x $LINUX_DIR/start.sh
+if [ $? -ne 0 ]; then
+    echo -e "${RED}❌ 后端构建失败！${NC}"
+    echo -e "${YELLOW}提示：SQLite 需要 CGO 支持。如果是从 Windows/macOS 交叉编译到 Linux，需要安装对应的交叉编译工具链（如 x86_64-linux-gnu-gcc）。${NC}"
+    echo -e "${YELLOW}或者您可以尝试设置 CGO_ENABLED=0，但这将导致 SQLite 无法使用。建议在 Linux 环境下或使用 Docker 进行构建。${NC}"
+    exit 1
+fi
 
-# 打包 Linux
-cd $DIST_DIR
-tar -czf nekobridge-linux-amd64-$VERSION.tar.gz nekobridge-linux-amd64
-cd ..
+# 4. 整理发布包
+echo -e "${YELLOW}🎁 正在整理发布包...${NC}"
+mkdir -p release
+cp bin/nekobridge-linux-amd64 release/nekobridge
+cp -r configs release/
+mkdir -p release/data
+mkdir -p release/logs
 
-# 创建发布包 - Windows
-echo "📦 创建 Windows 发布包..."
-WINDOWS_DIR="$DIST_DIR/nekobridge-windows-amd64"
-mkdir -p $WINDOWS_DIR
-cp $BUILD_DIR/nekobridge-windows-amd64.exe $WINDOWS_DIR/nekobridge.exe
-cp -r configs $WINDOWS_DIR/
-cp -r web $WINDOWS_DIR/
-cp README.md $WINDOWS_DIR/
-
-# 创建启动脚本 - Windows
-cat > $WINDOWS_DIR/start.bat << 'EOF'
-@echo off
-echo 🐱 启动 NekoBridge...
-nekobridge.exe
-pause
-EOF
-
-# 打包 Windows
-cd $DIST_DIR
-zip -r nekobridge-windows-amd64-$VERSION.zip nekobridge-windows-amd64
-cd ..
-
-echo "✅ 构建完成！"
-echo ""
-echo "📁 发布包位置:"
-echo "  - Linux:   $DIST_DIR/nekobridge-linux-amd64-$VERSION.tar.gz"
-echo "  - Windows: $DIST_DIR/nekobridge-windows-amd64-$VERSION.zip"
-echo ""
-echo "🚀 安装说明:"
-echo "Linux:"
-echo "  tar -xzf nekobridge-linux-amd64-$VERSION.tar.gz"
-echo "  cd nekobridge-linux-amd64"
-echo "  ./start.sh"
-echo ""
-echo "Windows:"
-echo "  解压 nekobridge-windows-amd64-$VERSION.zip"
-echo "  双击运行 start.bat"
-echo ""
-echo "🌐 访问地址: http://localhost:3000"
+echo -e "${GREEN}✅ 构建完成！${NC}"
+echo -e "${GREEN}� 发布包位于: ./release${NC}"
+echo -e "${YELLOW}使用方法:${NC}"
+echo -e "  cd release"
+echo -e "  chmod +x nekobridge"
+echo -e "  ./nekobridge"
