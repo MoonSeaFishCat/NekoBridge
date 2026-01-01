@@ -38,8 +38,8 @@ const ConnectionManager: React.FC = () => {
       }
     } catch (err: any) {
       console.error('加载连接失败:', err.message);
-      // 使用内联错误提示而不是依赖外部 error 函数
       const errorMsg = err.response?.data?.error || err.message || '网络错误';
+      error('加载失败', errorMsg);
     } finally {
       setLoading(false);
     }
