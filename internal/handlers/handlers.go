@@ -1,9 +1,11 @@
 package handlers
 
 import (
+	"bytes"
 	"embed"
 	"encoding/json"
 	"fmt"
+	"io"
 	"io/fs"
 	"log"
 	"nekobridge/internal/config"
@@ -444,23 +446,35 @@ func (h *Handlers) Webhook(c *gin.Context) {
 		return
 	}
 
-	var req models.WebhookRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		h.logger.Log("error", "Webhook请求解析失败", err)
+	// 读取原始 Body 以实现原样转发
+	bodyBytes, err := io.ReadAll(c.Request.Body)
+	if err != nil {
+		h.logger.Log("error", "读取 Webhook 请求体失败", err)
 		c.JSON(http.StatusBadRequest, models.APIResponse{
-			Error: "Invalid JSON",
+			Error: "Failed to read request body",
 		})
 		return
 	}
 
+	// 尝试解析为 JSON 结构以便日志记录和转发
+	var payload interface{}
+	if err := json.Unmarshal(bodyBytes, &payload); err != nil {
+		// 如果解析 JSON 失败，则作为原始字符串处理
+		payload = string(bodyBytes)
+	}
+
+	// 解析用于签名校验的特定结构 (QQ Webhook 模式)
+	var req models.WebhookRequest
+	_ = json.Unmarshal(bodyBytes, &req)
+
 	// 处理签名验证请求
 	if req.D.EventTs != "" && req.D.PlainToken != "" {
-		h.logger.Log("info", "收到签名校验请求", gin.H{"secret": secret})
+		h.logger.Log("info", "收到签名校验请求", gin.H{"secret": secret, "payload": payload})
 
 		if h.config.Security.EnableSignatureValidation {
 			result, err := h.signer.GenerateSignature(secret, req.D.EventTs, req.D.PlainToken)
 			if err != nil {
-				h.logger.Log("error", "签名校验失败", gin.H{"secret": secret, "error": err})
+				h.logger.Log("error", "签名校验失败", gin.H{"secret": secret, "error": err, "payload": payload})
 				c.JSON(http.StatusBadRequest, models.APIResponse{
 					Error: "Signature validation failed",
 				})
@@ -563,21 +577,16 @@ func (h *Handlers) Webhook(c *gin.Context) {
 	}
 
 	// 处理普通消息
-	h.logger.Log("info", "收到Webhook消息", gin.H{"secret": secret})
+	h.logger.Log("info", "收到Webhook消息", gin.H{"secret": secret, "payload": payload})
 
-	// 发送到WebSocket连接
-	message := models.WebSocketMessage{
-		Type: "webhook",
-		Data: req,
-	}
-
-	if err := h.wsManager.SendMessage(secret, message); err != nil {
-		h.logger.Log("warning", "未找到活跃连接", gin.H{"secret": secret})
+	// 发送到WebSocket连接 - 直接原样转发原始 Body 字节，不使用结构体包装
+	if err := h.wsManager.SendTextMessage(secret, string(bodyBytes)); err != nil {
+		h.logger.Log("warning", "消息推送失败：未找到活跃连接", gin.H{"secret": secret})
 		c.JSON(http.StatusOK, gin.H{"status": "连接未就绪"})
 		return
 	}
 
-	h.logger.Log("info", "消息推送成功", gin.H{"secret": secret})
+	h.logger.Log("info", "消息推送成功", gin.H{"secret": secret, "payload": payload})
 	h.config.MarkSecretUsed(secret)
 	c.JSON(http.StatusOK, gin.H{"status": "推送成功"})
 }

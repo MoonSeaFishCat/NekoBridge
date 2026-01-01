@@ -21,7 +21,14 @@ interface LogViewerProps {
   loading: boolean;
 }
 
-const LogViewer: React.FC<LogViewerProps> = ({ logs, onRefresh, loading }) => {
+interface TableCellProps {
+  row: LogEntry;
+  rowIndex: number;
+  col: any;
+  colIndex: number;
+}
+
+const LogViewer: React.FC<LogViewerProps> = ({ logs, onRefresh, loading }: LogViewerProps) => {
   const [levelFilter, setLevelFilter] = useState<string>('');
   const [searchText, setSearchText] = useState('');
   const [dateRange, setDateRange] = useState<[Date, Date] | null>(null);
@@ -33,12 +40,12 @@ const LogViewer: React.FC<LogViewerProps> = ({ logs, onRefresh, loading }) => {
 
     // 按级别过滤
     if (levelFilter) {
-      filtered = filtered.filter(log => log.level === levelFilter);
+      filtered = filtered.filter((log: LogEntry) => log.level === levelFilter);
     }
 
     // 按文本搜索
     if (searchText) {
-      filtered = filtered.filter(log => 
+      filtered = filtered.filter((log: LogEntry) => 
         log.message.toLowerCase().includes(searchText.toLowerCase()) ||
         log.details?.toString().toLowerCase().includes(searchText.toLowerCase())
       );
@@ -47,7 +54,7 @@ const LogViewer: React.FC<LogViewerProps> = ({ logs, onRefresh, loading }) => {
     // 按日期范围过滤
     if (dateRange) {
       const [start, end] = dateRange;
-      filtered = filtered.filter(log => {
+      filtered = filtered.filter((log: LogEntry) => {
         const logDate = new Date(log.timestamp);
         return logDate >= start && logDate <= end;
       });
@@ -59,7 +66,7 @@ const LogViewer: React.FC<LogViewerProps> = ({ logs, onRefresh, loading }) => {
   // 导出日志
   const handleExport = async () => {
     try {
-      const data = filteredLogs.map(log => ({
+      const data = filteredLogs.map((log: LogEntry) => ({
         时间: new Date(log.timestamp).toLocaleString(),
         级别: log.level,
         消息: log.message,
@@ -68,7 +75,7 @@ const LogViewer: React.FC<LogViewerProps> = ({ logs, onRefresh, loading }) => {
 
       const csv = [
         '时间,级别,消息,详情',
-        ...data.map(row => 
+        ...data.map((row: any) => 
           `"${row.时间}","${row.级别}","${row.消息}","${row.详情}"`
         )
       ].join('\n');
@@ -102,13 +109,13 @@ const LogViewer: React.FC<LogViewerProps> = ({ logs, onRefresh, loading }) => {
       title: '时间',
       key: 'timestamp',
       width: 180,
-      cell: (props: any) => new Date(props.row.timestamp).toLocaleString(),
+      cell: (props: TableCellProps) => new Date(props.row.timestamp).toLocaleString(),
     },
     {
       title: '级别',
       key: 'level',
       width: 100,
-      cell: (props: any) => (
+      cell: (props: TableCellProps) => (
         <Tag
           theme={getLevelColor(props.row.level)}
           variant="light"
@@ -121,21 +128,25 @@ const LogViewer: React.FC<LogViewerProps> = ({ logs, onRefresh, loading }) => {
       title: '消息',
       key: 'message',
       ellipsis: true,
-      cell: (props: any) => props.row.message,
+      cell: (props: TableCellProps) => props.row.message,
     },
     {
       title: '详情',
       key: 'details',
-      width: 200,
-      cell: (props: any) => props.row.details ? (
-        <div style={{ 
-          maxWidth: '200px', 
-          overflow: 'hidden', 
-          textOverflow: 'ellipsis',
-          whiteSpace: 'nowrap'
+      cell: (props: TableCellProps) => props.row.details ? (
+        <pre style={{ 
+          margin: 0,
+          padding: '8px',
+          backgroundColor: 'var(--td-bg-color-container)',
+          borderRadius: '4px',
+          fontSize: '12px',
+          maxHeight: '200px',
+          overflow: 'auto',
+          whiteSpace: 'pre-wrap',
+          wordBreak: 'break-all'
         }}>
-          {JSON.stringify(props.row.details)}
-        </div>
+          {JSON.stringify(props.row.details, null, 2)}
+        </pre>
       ) : '-',
     },
   ];
@@ -169,7 +180,7 @@ const LogViewer: React.FC<LogViewerProps> = ({ logs, onRefresh, loading }) => {
           <Select
             placeholder="选择日志级别"
             value={levelFilter}
-            onChange={(value) => setLevelFilter(value as string)}
+            onChange={(value: any) => setLevelFilter(value as string)}
             style={{ width: '150px' }}
           >
             <Select.Option value="">全部级别</Select.Option>
@@ -182,14 +193,14 @@ const LogViewer: React.FC<LogViewerProps> = ({ logs, onRefresh, loading }) => {
           <Input
             placeholder="搜索日志内容"
             value={searchText}
-            onChange={(value) => setSearchText(value)}
+            onChange={(value: string) => setSearchText(value)}
             style={{ width: '200px' }}
           />
 
           <DatePicker
             placeholder="选择日期范围"
             value={dateRange || undefined}
-            onChange={(value) => setDateRange(value as [Date, Date] | null)}
+            onChange={(value: any) => setDateRange(value as [Date, Date] | null)}
             style={{ width: '200px' }}
           />
 
