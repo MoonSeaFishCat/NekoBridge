@@ -149,13 +149,21 @@ export class ApiService {
     if (level) params.append('level', level);
     
     const response = await apiClient.get<{ logs: LogEntry[]; total: number }>(`/logs?${params}`);
+    console.log('后端日志响应:', response.data);
     return response.data;
   }
 
   // 连接管理
   async getConnections(): Promise<{ connections: Connection[]; total: number }> {
-    const response = await apiClient.get<{ connections: Connection[]; total: number }>('/connections');
-    return response.data;
+    const response = await apiClient.get<{ connections: any[]; total: number }>('/connections');
+    // 字段转换：下划线转驼峰
+    const connections = (response.data.connections || []).map((conn: any) => ({
+      ...conn,
+      createdAt: conn.created_at,
+      lastUsed: conn.last_used,
+      connectedAt: conn.connected_at,
+    }));
+    return { connections, total: response.data.total };
   }
 
   async kickConnection(secret: string): Promise<ApiResponse> {

@@ -1,6 +1,7 @@
 package models
 
 import (
+	"encoding/json"
 	"time"
 )
 
@@ -19,6 +20,18 @@ type LogEntry struct {
 	Level     string    `json:"level"`
 	Message   string    `json:"message"`
 	Details   any       `json:"details,omitempty"`
+}
+
+// MarshalJSON 自定义 JSON 序列化，将纳秒精度改为毫秒，使 JavaScript 能正确解析
+func (l LogEntry) MarshalJSON() ([]byte, error) {
+	type Alias LogEntry
+	return json.Marshal(&struct {
+		Timestamp string `json:"timestamp"`
+		*Alias
+	}{
+		Timestamp: l.Timestamp.Format("2006-01-02T15:04:05.000Z07:00"),
+		Alias:     (*Alias)(&l),
+	})
 }
 
 // Connection 连接信息

@@ -99,10 +99,13 @@ const App: React.FC = () => {
         apiService.getLogs(),
         apiService.getConnections(),
       ]);
+      console.log('加载日志数据:', logsData);
+      console.log('加载连接数据:', connectionsData);
       setLogs(logsData.logs || []);
       setConnections(connectionsData.connections || []);
-    } catch (error) {
+    } catch (error: any) {
       console.error('加载数据失败:', error);
+      console.error('错误详情:', error.response?.data);
     } finally {
       setLoading(false);
     }
