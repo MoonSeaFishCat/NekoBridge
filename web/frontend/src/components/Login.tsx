@@ -45,11 +45,11 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
       
       const response = await apiService.login(loginData);
       
-      if (response.success) {
+      if (response.success && response.data?.token) {
         MessagePlugin.success('登录成功');
-        onLogin(response.token || '');
+        onLogin(response.data.token);
       } else {
-        MessagePlugin.error(response.message || '登录失败');
+        MessagePlugin.error(response.message || response.data?.message || '登录失败');
       }
     } catch (error: any) {
       console.error('登录失败:', error);

@@ -98,10 +98,10 @@ apiClient.interceptors.response.use(
 // API服务类
 export class ApiService {
   // 认证相关
-  async login(credentials: LoginRequest): Promise<LoginResponse> {
-    const response = await apiClient.post<LoginResponse>('/auth/login', credentials);
-    if (response.data.success && response.data.token) {
-      authManager.setToken(response.data.token);
+  async login(credentials: LoginRequest): Promise<ApiResponse<LoginResponse>> {
+    const response = await apiClient.post<ApiResponse<LoginResponse>>('/auth/login', credentials);
+    if (response.data.success && response.data.data?.token) {
+      authManager.setToken(response.data.data.token);
     }
     return response.data;
   }
@@ -120,8 +120,9 @@ export class ApiService {
     }
 
     try {
-      const response = await apiClient.get<{ valid: boolean; user: any }>('/auth/verify');
-      return { isAuthenticated: response.data.valid, token: authManager.getToken() || undefined };
+      const response = await apiClient.get<ApiResponse<{ valid: boolean; user: any }>>('/auth/verify');
+      const isValid = response.data.success && response.data.data?.valid;
+      return { isAuthenticated: !!isValid, token: authManager.getToken() || undefined };
     } catch (error: any) {
       // 只有在明确收到 401 或 403 错误时才清除 token
       // 这样可以避免因网络波动或服务器暂时不可用导致的误登出
@@ -257,14 +258,14 @@ export class ApiService {
     return response.data;
   }
 
-  async batchOperateSecrets(request: BatchOperationRequest): Promise<{ success: boolean; results: BatchOperationResult }> {
-    const response = await apiClient.post<{ success: boolean; results: BatchOperationResult }>('/secrets/batch', request);
+  async batchOperateSecrets(request: BatchOperationRequest): Promise<ApiResponse<{ results: BatchOperationResult }>> {
+    const response = await apiClient.post<ApiResponse<{ results: BatchOperationResult }>>('/secrets/batch', request);
     return response.data;
   }
 
   // 配置管理
-  async getConfig(): Promise<SystemConfig> {
-    const response = await apiClient.get<SystemConfig>('/config');
+  async getConfig(): Promise<ApiResponse<SystemConfig>> {
+    const response = await apiClient.get<ApiResponse<SystemConfig>>('/config');
     return response.data;
   }
 
@@ -274,8 +275,8 @@ export class ApiService {
   }
 
   // 系统配置管理
-  async getSystemConfig(): Promise<{ success: boolean; data: any }> {
-    const response = await apiClient.get<{ success: boolean; data: any }>('/config/system');
+  async getSystemConfig(): Promise<ApiResponse<any>> {
+    const response = await apiClient.get<ApiResponse<any>>('/config/system');
     return response.data;
   }
 
@@ -284,8 +285,8 @@ export class ApiService {
     return response.data;
   }
 
-  async getSystemConfigSchema(): Promise<{ success: boolean; data: any }> {
-    const response = await apiClient.get<{ success: boolean; data: any }>('/config/system/schema');
+  async getSystemConfigSchema(): Promise<ApiResponse<any>> {
+    const response = await apiClient.get<ApiResponse<any>>('/config/system/schema');
     return response.data;
   }
 
@@ -300,8 +301,8 @@ export class ApiService {
   }
 
   // WebSocket配置管理
-  async getWebSocketConfig(): Promise<{ success: boolean; config: any }> {
-    const response = await apiClient.get<{ success: boolean; config: any }>('/config/websocket');
+  async getWebSocketConfig(): Promise<ApiResponse<{ config: any }>> {
+    const response = await apiClient.get<ApiResponse<{ config: any }>>('/config/websocket');
     return response.data;
   }
 
@@ -311,8 +312,8 @@ export class ApiService {
   }
 
   // 仪表盘统计
-  async getDashboardStats(): Promise<DashboardStats> {
-    const response = await apiClient.get<DashboardStats>('/dashboard/stats');
+  async getDashboardStats(): Promise<ApiResponse<DashboardStats>> {
+    const response = await apiClient.get<ApiResponse<DashboardStats>>('/dashboard/stats');
     return response.data;
   }
 }

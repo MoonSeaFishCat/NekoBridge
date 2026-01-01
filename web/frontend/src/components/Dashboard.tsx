@@ -47,8 +47,10 @@ const Dashboard: React.FC<DashboardProps> = ({
     const loadStats = async () => {
       try {
         setStatsLoading(true);
-        const data = await apiService.getDashboardStats();
-        setStats(data);
+        const response = await apiService.getDashboardStats();
+        if (response.success && response.data) {
+          setStats(response.data);
+        }
       } catch (error) {
         console.error('Failed to load dashboard stats:', error);
       } finally {
