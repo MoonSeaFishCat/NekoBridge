@@ -122,9 +122,16 @@ export class ApiService {
     try {
       const response = await apiClient.get<{ valid: boolean; user: any }>('/auth/verify');
       return { isAuthenticated: response.data.valid, token: authManager.getToken() || undefined };
-    } catch {
-      authManager.clearToken();
-      return { isAuthenticated: false };
+    } catch (error: any) {
+      // 只有在明确收到 401 或 403 错误时才清除 token
+      // 这样可以避免因网络波动或服务器暂时不可用导致的误登出
+      if (error.response?.status === 401 || error.response?.status === 403) {
+        authManager.clearToken();
+        return { isAuthenticated: false };
+      }
+      
+      // 对于其他错误（如网络错误），保持当前认证状态，让后续请求自行处理
+      return { isAuthenticated: true, token: authManager.getToken() || undefined };
     }
   }
 

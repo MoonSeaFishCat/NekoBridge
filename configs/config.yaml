@@ -7,9 +7,9 @@ auth:
   # 管理员密码
   password: admin123
   # 会话超时时间（秒），默认 86400 (24小时)
-  sessiontimeout: 86400
+  session_timeout: 86400
   # JWT 签名密钥，建议修改为随机字符串以增强安全性
-  jwtsecret: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+  jwt_secret: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
 
 # 日志配置
 logging:

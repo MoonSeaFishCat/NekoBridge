@@ -27,12 +27,16 @@ func NewJWTManager(secretKey string) *JWTManager {
 }
 
 // GenerateToken 生成JWT令牌
-func (j *JWTManager) GenerateToken(username string) (string, error) {
+func (j *JWTManager) GenerateToken(username string, duration time.Duration) (string, error) {
+	if duration <= 0 {
+		duration = 24 * time.Hour
+	}
+
 	claims := &Claims{
 		Username:  username,
 		LoginTime: time.Now().Unix(),
 		RegisteredClaims: jwt.RegisteredClaims{
-			ExpiresAt: jwt.NewNumericDate(time.Now().Add(24 * time.Hour)),
+			ExpiresAt: jwt.NewNumericDate(time.Now().Add(duration)),
 			IssuedAt:  jwt.NewNumericDate(time.Now()),
 			NotBefore: jwt.NewNumericDate(time.Now()),
 		},

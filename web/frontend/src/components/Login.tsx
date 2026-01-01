@@ -27,6 +27,7 @@ interface LoginProps {
 
 const Login: React.FC<LoginProps> = ({ onLogin }) => {
   const [loading, setLoading] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
   const [form] = Form.useForm();
   const { isDark, toggleTheme } = useTheme();
 
@@ -72,26 +73,44 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
       style={{
         minHeight: '100vh',
         background: isDark 
-          ? 'linear-gradient(135deg, #0F1419 0%, #1A1F3A 50%, #2D3748 100%)'
-          : 'linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%)',
+          ? '#0F1115'
+          : '#F4F7F9',
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
         padding: '20px',
         position: 'relative',
+        overflow: 'hidden',
       }}
     >
-      {/* 背景装饰 */}
+      {/* 动态背景装饰 */}
       <div
         style={{
           position: 'absolute',
-          top: 0,
-          left: 0,
-          right: 0,
-          bottom: 0,
+          width: '600px',
+          height: '600px',
+          borderRadius: '50%',
           background: isDark 
-            ? 'radial-gradient(circle at 20% 50%, rgba(91, 143, 255, 0.1) 0%, transparent 50%), radial-gradient(circle at 80% 20%, rgba(118, 75, 162, 0.1) 0%, transparent 50%)'
-            : 'radial-gradient(circle at 20% 50%, rgba(255, 255, 255, 0.3) 0%, transparent 50%), radial-gradient(circle at 80% 20%, rgba(255, 255, 255, 0.2) 0%, transparent 50%)',
+            ? 'radial-gradient(circle, rgba(22, 93, 255, 0.08) 0%, transparent 70%)'
+            : 'radial-gradient(circle, rgba(22, 93, 255, 0.05) 0%, transparent 70%)',
+          top: '-200px',
+          right: '-100px',
+          filter: 'blur(40px)',
+          pointerEvents: 'none',
+        }}
+      />
+      <div
+        style={{
+          position: 'absolute',
+          width: '500px',
+          height: '500px',
+          borderRadius: '50%',
+          background: isDark 
+            ? 'radial-gradient(circle, rgba(118, 75, 162, 0.08) 0%, transparent 70%)'
+            : 'radial-gradient(circle, rgba(118, 75, 162, 0.05) 0%, transparent 70%)',
+          bottom: '-150px',
+          left: '-100px',
+          filter: 'blur(40px)',
           pointerEvents: 'none',
         }}
       />
@@ -99,84 +118,73 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
       <Card
         style={{
           width: '100%',
-          maxWidth: '420px',
+          maxWidth: '440px',
           background: isDark 
-            ? '#1A1A1A'
-            : '#FFFFFF',
+            ? 'rgba(24, 26, 31, 0.8)'
+            : 'rgba(255, 255, 255, 0.9)',
+          backdropFilter: 'blur(20px)',
           border: isDark 
-            ? '1px solid #404040'
-            : '1px solid #e0e0e0',
-          borderRadius: '12px',
+            ? '1px solid rgba(255, 255, 255, 0.08)'
+            : '1px solid rgba(0, 0, 0, 0.05)',
+          borderRadius: '24px',
           boxShadow: isDark
-            ? '0 8px 32px rgba(0, 0, 0, 0.3)'
-            : '0 8px 32px rgba(0, 0, 0, 0.1)',
-          padding: '40px',
+            ? '0 25px 50px -12px rgba(0, 0, 0, 0.5)'
+            : '0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04)',
+          padding: '48px 40px',
           position: 'relative',
+          zIndex: 1,
         }}
       >
-        {/* 顶部工具栏 */}
-        <div style={{ 
-          display: 'flex', 
-          justifyContent: 'space-between', 
-          alignItems: 'center',
-          marginBottom: '32px'
-        }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <div
-              style={{
-                width: '40px',
-                height: '40px',
-                background: isDark 
-                  ? 'linear-gradient(135deg, #5B8FFF 0%, #4A7FFF 100%)'
-                  : 'linear-gradient(135deg, #165DFF 0%, #0052D9 100%)',
-                borderRadius: '8px',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-              }}
-            >
-              <KeyIcon size="20px" color="white" />
-            </div>
-            <div>
-              <Title 
-                level="h4" 
-                style={{ 
-                  margin: 0, 
-                  color: isDark ? '#FFFFFF' : '#1A1A1A',
-                  fontWeight: '600',
-                }}
-              >
-                NekoBridge
-              </Title>
-              <Text 
-                style={{ 
-                  color: isDark ? '#A0A0A0' : '#666666',
-                  fontSize: '12px',
-                }}
-              >
-                企业级管理平台
-              </Text>
-            </div>
+        {/* 顶部 Logo 与 标题 */}
+        <div style={{ textAlign: 'center', marginBottom: '40px' }}>
+          <div
+            style={{
+              width: '64px',
+              height: '64px',
+              background: 'linear-gradient(135deg, #165DFF 0%, #0052D9 100%)',
+              borderRadius: '20px',
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              marginBottom: '20px',
+              boxShadow: '0 10px 20px -5px rgba(22, 93, 255, 0.3)',
+            }}
+          >
+            <KeyIcon size="32px" color="white" />
           </div>
-          
-          <Space>
-            <Button
-              variant="text"
-              icon={<MoonIcon />}
-              onClick={toggleTheme}
-              size="small"
-              style={{ color: isDark ? '#5B8FFF' : '#165DFF' }}
-              title={isDark ? '切换到浅色模式' : '切换到深色模式'}
-            />
-            <Button
-              variant="text"
-              icon={<RefreshIcon />}
-              onClick={() => window.location.reload()}
-              size="small"
-              style={{ color: isDark ? '#A0A0A0' : '#666666' }}
-              title="刷新页面"
-            />
-          </Space>
+          <Title 
+            level="h3" 
+            style={{ 
+              margin: '0 0 8px 0', 
+              color: isDark ? '#FFFFFF' : '#1D2129',
+              fontWeight: '700',
+              fontSize: '28px',
+              letterSpacing: '-0.5px',
+            }}
+          >
+            NekoBridge
+          </Title>
+          <Text 
+            style={{ 
+              color: isDark ? '#86909C' : '#4E5969',
+              fontSize: '14px',
+            }}
+          >
+            现代化的 Webhook 桥接管理系统
+          </Text>
+        </div>
+
+        {/* 模式切换 */}
+        <div style={{ position: 'absolute', top: '24px', right: '24px' }}>
+          <Button
+            variant="text"
+            shape="circle"
+            icon={isDark ? <MoonIcon /> : <MoonIcon style={{ color: '#4E5969' }} />}
+            onClick={toggleTheme}
+            style={{ 
+              background: isDark ? 'rgba(255, 255, 255, 0.05)' : 'rgba(0, 0, 0, 0.03)',
+            }}
+          />
         </div>
 
         {/* 登录表单 */}
@@ -189,26 +197,28 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
             }
           }}
           colon={false}
+          requiredMark={false}
         >
           <FormItem
             name="username"
             label={
-              <Space size="small" style={{ color: isDark ? '#E0E0E0' : '#333333', fontWeight: '500' }}>
-                <UserIcon size="16px" />
-                <span>用户名</span>
-              </Space>
+              <Text style={{ color: isDark ? '#C9CDD4' : '#4E5969', fontSize: '13px', fontWeight: '500' }}>
+                管理员账号
+              </Text>
             }
-            rules={[{ required: true, message: '请输入用户名' }]}
+            rules={[{ required: true, message: '请输入账号' }]}
           >
             <Input
-              placeholder="请输入用户名"
+              prefixIcon={<UserIcon style={{ color: '#86909C' }} />}
+              placeholder="请输入管理员账号"
               size="large"
               style={{ 
-                height: '48px',
-                background: isDark ? '#2A2A2A' : '#FFFFFF',
-                borderColor: isDark ? '#404040' : '#e0e0e0',
-                color: isDark ? '#FFFFFF' : '#333333',
-                borderRadius: '8px',
+                height: '52px',
+                background: isDark ? 'rgba(255, 255, 255, 0.03)' : '#FFFFFF',
+                borderColor: isDark ? 'rgba(255, 255, 255, 0.1)' : '#E5E6EB',
+                color: isDark ? '#FFFFFF' : '#1D2129',
+                borderRadius: '12px',
+                transition: 'all 0.2s',
               }}
             />
           </FormItem>
@@ -216,28 +226,37 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
           <FormItem
             name="password"
             label={
-              <Space size="small" style={{ color: isDark ? '#E0E0E0' : '#333333', fontWeight: '500' }}>
-                <LockOnIcon size="16px" />
-                <span>密码</span>
-              </Space>
+              <Text style={{ color: isDark ? '#C9CDD4' : '#4E5969', fontSize: '13px', fontWeight: '500' }}>
+                访问密码
+              </Text>
             }
             rules={[{ required: true, message: '请输入密码' }]}
           >
             <Input
-              type="password"
-              placeholder="请输入密码"
+              type={showPassword ? 'text' : 'password'}
+              prefixIcon={<LockOnIcon style={{ color: '#86909C' }} />}
+              suffixIcon={
+                <div 
+                  onClick={() => setShowPassword(!showPassword)}
+                  style={{ cursor: 'pointer', display: 'flex', alignItems: 'center' }}
+                >
+                  <RefreshIcon style={{ color: '#86909C', transform: showPassword ? 'rotate(180deg)' : 'none', transition: 'all 0.3s' }} />
+                </div>
+              }
+              placeholder="请输入登录密码"
               size="large"
               style={{ 
-                height: '48px',
-                background: isDark ? '#2A2A2A' : '#FFFFFF',
-                borderColor: isDark ? '#404040' : '#e0e0e0',
-                color: isDark ? '#FFFFFF' : '#333333',
-                borderRadius: '8px',
+                height: '52px',
+                background: isDark ? 'rgba(255, 255, 255, 0.03)' : '#FFFFFF',
+                borderColor: isDark ? 'rgba(255, 255, 255, 0.1)' : '#E5E6EB',
+                color: isDark ? '#FFFFFF' : '#1D2129',
+                borderRadius: '12px',
+                transition: 'all 0.2s',
               }}
             />
           </FormItem>
 
-          <FormItem style={{ marginTop: '32px' }}>
+          <FormItem style={{ marginTop: '40px' }}>
             <Button
               theme="primary"
               size="large"
@@ -245,34 +264,38 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
               loading={loading}
               type="submit"
               style={{ 
-                height: '48px', 
+                height: '52px', 
                 fontSize: '16px',
                 fontWeight: '600',
-                borderRadius: '8px',
+                borderRadius: '12px',
+                background: 'linear-gradient(135deg, #165DFF 0%, #0052D9 100%)',
+                border: 'none',
+                boxShadow: '0 4px 12px rgba(22, 93, 255, 0.25)',
               }}
             >
-              {loading ? '登录中...' : '登录'}
+              {loading ? '身份验证中...' : '立即登录'}
             </Button>
           </FormItem>
         </Form>
 
-        {/* 底部信息 */}
+        {/* 底部版权信息 */}
         <div style={{ 
           textAlign: 'center', 
-          marginTop: '24px',
-          paddingTop: '24px',
-          borderTop: `1px solid ${isDark ? '#404040' : '#E5E5E5'}`,
+          marginTop: '40px',
         }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '12px', marginBottom: '16px' }}>
+            <div style={{ height: '1px', flex: 1, background: isDark ? 'rgba(255, 255, 255, 0.05)' : '#F2F3F5' }}></div>
+            <Text style={{ color: isDark ? '#4E5969' : '#86909C', fontSize: '12px' }}>
+              SECURE ACCESS
+            </Text>
+            <div style={{ height: '1px', flex: 1, background: isDark ? 'rgba(255, 255, 255, 0.05)' : '#F2F3F5' }}></div>
+          </div>
           <Text style={{ 
-            color: isDark ? '#888888' : '#999999',
+            color: isDark ? '#4E5969' : '#86909C',
             fontSize: '12px',
-            lineHeight: '1.5',
+            display: 'block',
           }}>
-            🔒 安全登录 • 数据加密 • 企业级保护
-            <br />
-            <span style={{ fontSize: '11px', color: isDark ? '#666666' : '#CCCCCC' }}>
-              © 2024 NekoBridge. 保留所有权利。
-            </span>
+            © 2026 NekoBridge Team. All rights reserved.
           </Text>
         </div>
       </Card>

@@ -274,7 +274,7 @@ func (h *Handlers) AuthMiddleware() gin.HandlerFunc {
 
 		claims, err := h.jwtManager.ValidateToken(token)
 		if err != nil {
-			h.Error(c, http.StatusForbidden, "Invalid or expired token")
+			h.Error(c, http.StatusUnauthorized, "Invalid or expired token")
 			c.Abort()
 			return
 		}
@@ -396,7 +396,11 @@ func (h *Handlers) Login(c *gin.Context) {
 	}
 
 	// 生成JWT令牌
-	token, err := h.jwtManager.GenerateToken(req.Username)
+	timeout := time.Duration(h.config.Auth.SessionTimeout) * time.Second
+	if timeout <= 0 {
+		timeout = 24 * time.Hour
+	}
+	token, err := h.jwtManager.GenerateToken(req.Username, timeout)
 	if err != nil {
 		h.logger.Log("error", "生成JWT令牌失败", err)
 		h.Error(c, http.StatusInternalServerError, "服务器错误")
