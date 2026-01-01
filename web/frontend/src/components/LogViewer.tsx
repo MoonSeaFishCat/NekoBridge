@@ -97,7 +97,7 @@ const LogViewer: React.FC<LogViewerProps> = ({ logs, onRefresh, loading }: LogVi
     switch (level) {
       case 'error': return 'danger';
       case 'warning': return 'warning';
-      case 'info': return 'primary';
+      case 'info': return 'success';
       case 'debug': return 'default';
       default: return 'default';
     }
@@ -109,7 +109,11 @@ const LogViewer: React.FC<LogViewerProps> = ({ logs, onRefresh, loading }: LogVi
       title: '时间',
       key: 'timestamp',
       width: 180,
-      cell: (props: TableCellProps) => new Date(props.row.timestamp).toLocaleString(),
+      cell: (props: TableCellProps) => (
+        <span style={{ color: 'var(--nb-text-secondary)', fontSize: '13px' }}>
+          {new Date(props.row.timestamp).toLocaleString()}
+        </span>
+      ),
     },
     {
       title: '级别',
@@ -119,6 +123,8 @@ const LogViewer: React.FC<LogViewerProps> = ({ logs, onRefresh, loading }: LogVi
         <Tag
           theme={getLevelColor(props.row.level)}
           variant="light"
+          shape="round"
+          size="small"
         >
           {props.row.level.toUpperCase()}
         </Tag>
@@ -128,7 +134,11 @@ const LogViewer: React.FC<LogViewerProps> = ({ logs, onRefresh, loading }: LogVi
       title: '消息',
       key: 'message',
       ellipsis: true,
-      cell: (props: TableCellProps) => props.row.message,
+      cell: (props: TableCellProps) => (
+        <span style={{ fontWeight: 500, color: 'var(--nb-text-main)' }}>
+          {props.row.message}
+        </span>
+      ),
     },
     {
       title: '详情',
@@ -136,28 +146,45 @@ const LogViewer: React.FC<LogViewerProps> = ({ logs, onRefresh, loading }: LogVi
       cell: (props: TableCellProps) => props.row.details ? (
         <pre style={{ 
           margin: 0,
-          padding: '8px',
-          backgroundColor: 'var(--td-bg-color-container)',
-          borderRadius: '4px',
-          fontSize: '12px',
-          maxHeight: '200px',
+          padding: '12px',
+          backgroundColor: 'var(--nb-bg-layout)',
+          border: '1px solid var(--nb-border-color)',
+          borderRadius: '8px',
+          fontSize: '11px',
+          maxHeight: '150px',
           overflow: 'auto',
           whiteSpace: 'pre-wrap',
-          wordBreak: 'break-all'
+          wordBreak: 'break-all',
+          color: 'var(--nb-text-secondary)',
+          fontFamily: 'monospace'
         }}>
           {JSON.stringify(props.row.details, null, 2)}
         </pre>
-      ) : '-',
+      ) : <span style={{ color: 'var(--nb-text-secondary)' }}>-</span>,
     },
   ];
 
   return (
     <Card
+      className="glass-effect animate-fade-in"
+      style={{ boxShadow: 'var(--nb-shadow)', border: 'none' }}
       header={
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <span>日志查看器</span>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <div style={{ 
+              padding: '6px', 
+              background: 'var(--nb-primary-light)', 
+              borderRadius: '6px',
+              display: 'flex',
+              alignItems: 'center'
+            }}>
+              <DownloadIcon style={{ color: 'var(--nb-primary)' }} />
+            </div>
+            <span style={{ fontWeight: 600 }}>实时日志查询</span>
+          </div>
           <Space>
             <Button
+              variant="outline"
               icon={<RefreshIcon />}
               onClick={onRefresh}
               loading={loading}
@@ -165,55 +192,74 @@ const LogViewer: React.FC<LogViewerProps> = ({ logs, onRefresh, loading }: LogVi
               刷新
             </Button>
             <Button
+              variant="base"
               icon={<DownloadIcon />}
               onClick={handleExport}
             >
-              导出
+              导出 CSV
             </Button>
           </Space>
         </div>
       }
     >
       {/* 过滤器 */}
-      <div style={{ marginBottom: '16px' }}>
-        <Space>
-          <Select
-            placeholder="选择日志级别"
-            value={levelFilter}
-            onChange={(value: any) => setLevelFilter(value as string)}
-            style={{ width: '150px' }}
-          >
-            <Select.Option value="">全部级别</Select.Option>
-            <Select.Option value="debug">Debug</Select.Option>
-            <Select.Option value="info">Info</Select.Option>
-            <Select.Option value="warning">Warning</Select.Option>
-            <Select.Option value="error">Error</Select.Option>
-          </Select>
+      <div style={{ 
+        marginBottom: '20px', 
+        padding: '16px', 
+        background: 'var(--nb-bg-layout)', 
+        borderRadius: '10px',
+        border: '1px solid var(--nb-border-color)'
+      }}>
+        <Space breakLine>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <span style={{ fontSize: '13px', color: 'var(--nb-text-secondary)', whiteSpace: 'nowrap' }}>日志级别:</span>
+            <Select
+              placeholder="全部级别"
+              value={levelFilter}
+              onChange={(value: any) => setLevelFilter(value as string)}
+              style={{ width: '140px' }}
+              clearable
+            >
+              <Select.Option value="debug">Debug</Select.Option>
+              <Select.Option value="info">Info</Select.Option>
+              <Select.Option value="warning">Warning</Select.Option>
+              <Select.Option value="error">Error</Select.Option>
+            </Select>
+          </div>
 
-          <Input
-            placeholder="搜索日志内容"
-            value={searchText}
-            onChange={(value: string) => setSearchText(value)}
-            style={{ width: '200px' }}
-          />
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <span style={{ fontSize: '13px', color: 'var(--nb-text-secondary)', whiteSpace: 'nowrap' }}>搜索内容:</span>
+            <Input
+              placeholder="关键字搜索..."
+              value={searchText}
+              onChange={(value: string) => setSearchText(value)}
+              style={{ width: '220px' }}
+              clearable
+            />
+          </div>
 
-          <DatePicker
-            placeholder="选择日期范围"
-            value={dateRange || undefined}
-            onChange={(value: any) => setDateRange(value as [Date, Date] | null)}
-            style={{ width: '200px' }}
-          />
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <span style={{ fontSize: '13px', color: 'var(--nb-text-secondary)', whiteSpace: 'nowrap' }}>时间范围:</span>
+            <DatePicker
+              placeholder="选择日期范围"
+              value={dateRange || undefined}
+              onChange={(value: any) => setDateRange(value as [Date, Date] | null)}
+              style={{ width: '240px' }}
+              clearable
+            />
+          </div>
 
           {(levelFilter || searchText || dateRange) && (
             <Button
               variant="text"
+              theme="primary"
               onClick={() => {
                 setLevelFilter('');
                 setSearchText('');
                 setDateRange(null);
               }}
             >
-              清除过滤
+              重置过滤器
             </Button>
           )}
         </Space>
@@ -224,10 +270,13 @@ const LogViewer: React.FC<LogViewerProps> = ({ logs, onRefresh, loading }: LogVi
         columns={columns}
         loading={loading}
         rowKey="id"
+        verticalAlign="top"
         pagination={{
           pageSize: 20,
+          showPageSize: false,
         }}
-        empty="暂无日志记录"
+        empty={<div style={{ padding: '40px', textAlign: 'center', color: 'var(--nb-text-secondary)' }}>暂无匹配的日志记录</div>}
+        style={{ borderRadius: '8px', overflow: 'hidden' }}
       />
     </Card>
   );

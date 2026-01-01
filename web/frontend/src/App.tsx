@@ -175,149 +175,193 @@ const App: React.FC = () => {
 
   return (
     <WebConsoleGuard>
-      <div style={{ height: '100vh', display: 'flex' }}>
+      <div style={{ height: '100vh', display: 'flex', backgroundColor: 'var(--nb-bg-layout)' }}>
         {/* 侧边栏 */}
         <div
+          className="glass-effect"
           style={{
-            width: collapsed ? '60px' : '240px',
-            background: isDark ? '#1A1A1A' : '#f5f5f5',
-            borderRight: `1px solid ${isDark ? '#404040' : '#e0e0e0'}`,
-            transition: 'width 0.3s ease',
+            width: collapsed ? '64px' : '240px',
+            background: 'var(--nb-bg-sidebar)',
+            borderRight: '1px solid var(--nb-border-color)',
+            transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
             display: 'flex',
             flexDirection: 'column',
+            zIndex: 100,
           }}
         >
-        <div
-          style={{
-            padding: '16px',
-            borderBottom: `1px solid ${isDark ? '#404040' : '#e0e0e0'}`,
-            fontSize: '18px',
-            fontWeight: 'bold',
-            color: isDark ? '#FFFFFF' : '#333',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            textShadow: isDark ? '0 0 10px rgba(255,255,255,0.1)' : 'none',
-          }}>
-          <span>{collapsed ? '🐱' : '🐱 NekoBridge'}</span>
-          {!collapsed && (
-            <Button
-              variant="text"
-              icon={<MoonIcon />}
-              onClick={() => setCollapsed(!collapsed)}
-              size="small"
-            />
-          )}
-        </div>
-        
-        <Menu
-          value={currentTab}
-          onChange={(value) => setCurrentTab(value as string)}
-          style={{ border: 'none', flex: 1 }}
-        >
-          {menuItems.map((item) => (
-            <MenuItem key={item.key} value={item.key}>
-              <Space>
-                {item.icon}
-                {!collapsed && (
-                  <span style={{ 
-                    color: isDark ? '#E0E0E0' : '#333',
-                    fontWeight: '500'
-                  }}>
-                    {item.label}
-                  </span>
-                )}
-                {item.badge && item.badge > 0 && (
-                  <Badge count={item.badge} size="small" />
-                )}
-              </Space>
-            </MenuItem>
-          ))}
-        </Menu>
-      </div>
-
-      {/* 主内容区域 */}
-      <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
-        {/* 顶部导航栏 */}
-        <div
-          style={{
-            height: '60px',
-            background: isDark ? '#1A1A1A' : '#fff',
-            borderBottom: `1px solid ${isDark ? '#404040' : '#e0e0e0'}`,
-            padding: '0 24px',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-          }}
-        >
-          <div style={{ display: 'flex', alignItems: 'center' }}>
-            <Button
-              variant="text"
-              icon={<MoonIcon />}
-              onClick={() => setDrawerVisible(true)}
-              style={{ marginRight: '16px' }}
-            />
-            <Typography.Text style={{ 
-              color: isDark ? '#FFFFFF' : '#666',
-              fontWeight: '600',
-              fontSize: '16px'
-            }}>
-              {menuItems.find(item => item.key === currentTab)?.label}
-            </Typography.Text>
+          {/* Logo 区域 */}
+          <div
+            style={{
+              height: '64px',
+              display: 'flex',
+              alignItems: 'center',
+              padding: collapsed ? '0' : '0 20px',
+              justifyContent: collapsed ? 'center' : 'flex-start',
+              borderBottom: '1px solid var(--nb-border-color)',
+              overflow: 'hidden',
+            }}
+          >
+            <div
+              style={{
+                width: '32px',
+                height: '32px',
+                background: 'var(--nb-primary)',
+                borderRadius: '8px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                marginRight: collapsed ? '0' : '12px',
+                flexShrink: 0,
+                boxShadow: '0 2px 8px rgba(0, 82, 217, 0.3)',
+              }}
+            >
+              <span style={{ fontSize: '20px' }}>🐱</span>
+            </div>
+            {!collapsed && (
+              <span
+                style={{
+                  fontSize: '18px',
+                  fontWeight: 'bold',
+                  color: 'var(--nb-text-main)',
+                  whiteSpace: 'nowrap',
+                  letterSpacing: '0.5px',
+                }}
+              >
+                NekoBridge
+              </span>
+            )}
           </div>
 
-          <Space>
-            <Switch
-              value={isDark}
-              onChange={() => {
-                toggleTheme();
-                const newMode = isDark ? '浅色模式' : '深色模式';
-                success('主题切换成功', `已切换到${newMode}`, 2000);
-              }}
-              label="深色模式"
+          {/* 菜单区域 */}
+          <div style={{ flex: 1, padding: '12px 0' }}>
+            <Menu
+              value={currentTab}
+              onChange={(val) => setCurrentTab(val as string)}
+              collapsed={collapsed}
+              style={{ border: 'none', background: 'transparent' }}
+            >
+              {menuItems.map((item) => (
+                <MenuItem
+                  key={item.key}
+                  value={item.key}
+                  icon={item.icon}
+                  style={{
+                    borderRadius: '8px',
+                    margin: '4px 12px',
+                    height: '44px',
+                  }}
+                >
+                  {item.label}
+                </MenuItem>
+              ))}
+            </Menu>
+          </div>
+
+          {/* 底部折叠按钮 */}
+          <div
+            style={{
+              padding: '16px',
+              borderTop: '1px solid var(--nb-border-color)',
+              display: 'flex',
+              justifyContent: collapsed ? 'center' : 'flex-end',
+            }}
+          >
+            <Button
+              variant="text"
+              shape="square"
+              onClick={() => setCollapsed(!collapsed)}
+              icon={collapsed ? <DashboardIcon /> : <SettingIcon />}
+              style={{ color: 'var(--nb-text-secondary)' }}
             />
-            <Button
-              variant="text"
-              size="small"
-              onClick={() => {
-                clearThemeCache();
-                success('缓存已清理', '主题已重置为默认浅色模式', 2000);
-              }}
-            >
-              清理缓存
-            </Button>
-            <Dropdown
-              trigger="click"
-              options={[
-                { content: '个人设置', value: 'profile' },
-                { content: '系统设置', value: 'system' },
-                { content: '帮助文档', value: 'help' },
-              ]}
-            >
-              <Button variant="text" icon={<UserIcon />}>
-                管理员
-              </Button>
-            </Dropdown>
-            <Button
-              variant="text"
-              icon={<PoweroffIcon />}
-              onClick={handleLogout}
-            >
-              退出
-            </Button>
-          </Space>
+          </div>
         </div>
 
-        {/* 内容区域 */}
-        <div
-          style={{
-            flex: 1,
-            padding: '24px',
-            background: isDark ? '#0D0D0D' : '#fafafa',
-            overflow: 'auto',
-          }}
-        >
-          {renderContent()}
+        {/* 主内容区域 */}
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+          {/* 顶部导航栏 */}
+          <div
+            className="glass-effect"
+            style={{
+              height: '64px',
+              background: 'var(--nb-bg-card)',
+              borderBottom: '1px solid var(--nb-border-color)',
+              padding: '0 24px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              zIndex: 90,
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+              <span style={{ fontSize: '16px', fontWeight: 500, color: 'var(--nb-text-main)' }}>
+                {menuItems.find(item => item.key === currentTab)?.label}
+              </span>
+            </div>
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+              <Space>
+                <Switch
+                  value={isDark}
+                  onChange={() => {
+                    toggleTheme();
+                    const newMode = isDark ? '浅色模式' : '深色模式';
+                    success('主题切换成功', `已切换到${newMode}`, 2000);
+                  }}
+                  label="深色模式"
+                />
+                <div
+                  style={{
+                    height: '20px',
+                    width: '1px',
+                    background: 'var(--nb-border-color)',
+                    margin: '0 8px',
+                  }}
+                />
+                <Dropdown
+                  options={[
+                    { content: '个人设置', value: 'profile' },
+                    { content: '系统设置', value: 'system' },
+                    { content: '帮助文档', value: 'help' },
+                    { content: '退出登录', value: 'logout', theme: 'error' },
+                  ]}
+                  onClick={(data) => {
+                    if (data.value === 'logout') handleLogout();
+                  }}
+                >
+                  <div
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '8px',
+                      cursor: 'pointer',
+                      padding: '4px 8px',
+                      borderRadius: '6px',
+                      transition: 'background 0.2s',
+                    }}
+                    className="card-hover"
+                  >
+                    <UserIcon />
+                    <span style={{ fontSize: '14px', color: 'var(--nb-text-main)' }}>管理员</span>
+                  </div>
+                </Dropdown>
+              </Space>
+            </div>
+          </div>
+
+          {/* 内容展示区 */}
+          <div
+            className="animate-fade-in"
+            style={{
+              flex: 1,
+              padding: '24px',
+              overflowY: 'auto',
+              background: 'var(--nb-bg-layout)',
+            }}
+          >
+            <div style={{ maxWidth: '1400px', margin: '0 auto' }}>
+              {renderContent()}
+            </div>
+          </div>
         </div>
       </div>
 
