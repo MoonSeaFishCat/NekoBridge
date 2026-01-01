@@ -16,7 +16,6 @@ import {
   HistoryIcon,
   LinkIcon,
   RefreshIcon,
-  MoonIcon,
   PoweroffIcon,
   BookIcon,
   PaletteIcon,
@@ -45,7 +44,7 @@ const { MenuItem } = Menu;
 
 interface MenuItem {
   key: string;
-  icon: React.ReactNode;
+  icon: React.ReactElement;
   label: string;
   badge?: number;
 }
@@ -70,7 +69,7 @@ const App: React.FC = () => {
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [connections, setConnections] = useState<Connection[]>([]);
   const [loading, setLoading] = useState(false);
-  const { toggleTheme, isDark, clearThemeCache } = useTheme();
+  const { toggleTheme, isDark } = useTheme();
   const { toasts, removeToast, success } = useToast();
 
   // 检查认证状态
@@ -422,7 +421,6 @@ const App: React.FC = () => {
           onClose={removeToast}
         />
       ))}
-       </div>
     </WebConsoleGuard>
   );
 };
