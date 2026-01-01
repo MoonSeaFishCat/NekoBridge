@@ -220,6 +220,13 @@ func (m *Manager) GetConnections() []models.Connection {
 	defer m.mu.RUnlock()
 
 	connections := make([]models.Connection, 0, len(m.connections))
+	
+	// 预先获取所有密钥配置，避免在循环中重复加锁
+	var secretConfigs map[string]config.SecretConfig
+	if m.config != nil {
+		secretConfigs = m.config.GetSecrets()
+	}
+	
 	for secret, conn := range m.connections {
 		connection := models.Connection{
 			Secret:      secret,
@@ -227,12 +234,12 @@ func (m *Manager) GetConnections() []models.Connection {
 			ConnectedAt: time.Now(),
 		}
 
-		// 从配置中获取更多信息
-		if secretConfig, exists := m.config.GetSecretConfig(secret); exists {
-			connection.Enabled = secretConfig.Enabled
-			connection.Description = secretConfig.Description
-			connection.CreatedAt = &secretConfig.CreatedAt
-			connection.LastUsed = secretConfig.LastUsed
+		// 从预加载的配置中获取更多信息
+		if secretCfg, exists := secretConfigs[secret]; exists {
+			connection.Enabled = secretCfg.Enabled
+			connection.Description = secretCfg.Description
+			connection.CreatedAt = &secretCfg.CreatedAt
+			connection.LastUsed = secretCfg.LastUsed
 		}
 
 		connections = append(connections, connection)

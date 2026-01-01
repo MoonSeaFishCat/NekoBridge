@@ -25,7 +25,7 @@ const API_BASE_URL = '/api';
 // 创建axios实例
 const apiClient: AxiosInstance = axios.create({
   baseURL: API_BASE_URL,
-  timeout: 10000,
+  timeout: 30000,
   headers: {
     'Content-Type': 'application/json',
   },
@@ -148,9 +148,19 @@ export class ApiService {
     if (limit) params.append('limit', limit.toString());
     if (level) params.append('level', level);
     
-    const response = await apiClient.get<{ logs: LogEntry[]; total: number }>(`/logs?${params}`);
-    console.log('后端日志响应:', response.data);
-    return response.data;
+    try {
+      const response = await apiClient.get<{ logs: LogEntry[]; total: number }>(`/logs?${params}`);
+      console.log('后端日志响应:', response.data);
+      return response.data;
+    } catch (error: any) {
+      console.error('getLogs 请求失败:', {
+        status: error.response?.status,
+        statusText: error.response?.statusText,
+        data: error.response?.data,
+        message: error.message,
+      });
+      throw error;
+    }
   }
 
   // 连接管理

@@ -103,9 +103,12 @@ const App: React.FC = () => {
       console.log('加载连接数据:', connectionsData);
       setLogs(logsData.logs || []);
       setConnections(connectionsData.connections || []);
+      console.log('设置 logs 成功，数量:', logsData.logs?.length || 0);
+      console.log('设置 connections 成功，数量:', connectionsData.connections?.length || 0);
     } catch (error: any) {
-      console.error('加载数据失败:', error);
-      console.error('错误详情:', error.response?.data);
+      console.error('加载数据失败:', error.message || error);
+      console.error('错误详情:', error.response?.data || error.toString());
+      console.error('状态码:', error.response?.status);
     } finally {
       setLoading(false);
     }
