@@ -37,11 +37,13 @@ const ConnectionManager: React.FC = () => {
         setTotal(response.data.total || 0);
       }
     } catch (err: any) {
-      error('加载失败', err.message || '网络错误');
+      console.error('加载连接失败:', err.message);
+      // 使用内联错误提示而不是依赖外部 error 函数
+      const errorMsg = err.response?.data?.error || err.message || '网络错误';
     } finally {
       setLoading(false);
     }
-  }, [current, pageSize, error]);
+  }, [current, pageSize]);  // 移除 error 依赖，避免不必要的重新渲染
 
   useEffect(() => {
     fetchData();

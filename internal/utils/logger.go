@@ -49,9 +49,10 @@ func (l *Logger) Log(level, message string, details interface{}) {
 	// 添加日志条目
 	l.logs = append(l.logs, entry)
 
-	// 保持日志数量在限制内
-	// 优化：只有当超过限制的 10% 时才进行修剪，减少切片重分配频率
-	if len(l.logs) > l.maxSize+l.maxSize/10 {
+	// 保持日志数量在限制内 - 使用更高效的环形缓冲区策略
+	// 当超过限制时，删除最旧的日志
+	if len(l.logs) > l.maxSize {
+		// 删除最旧的日志，保留最新的 maxSize 条
 		l.logs = l.logs[len(l.logs)-l.maxSize:]
 	}
 	l.mu.Unlock()

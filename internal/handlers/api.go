@@ -42,16 +42,26 @@ func (h *Handlers) GetLogs(c *gin.Context) {
 
 // GetConnections 获取连接
 func (h *Handlers) GetConnections(c *gin.Context) {
-	limitStr := c.DefaultQuery("limit", "100")
+	limitStr := c.DefaultQuery("limit", "50")   // 改为 50，减少单次返回数据量
 	offsetStr := c.DefaultQuery("offset", "0")
 
 	limit, err := strconv.Atoi(limitStr)
-	if err != nil {
-		limit = 100
+	if err != nil || limit <= 0 {
+		limit = 50
+	}
+
+	// 强制限制最大返回数量，防止恶意请求或意外的大数据传输
+	const maxLimit = 200
+	if limit > maxLimit {
+		limit = maxLimit
+		h.logger.Log("warning", "GetConnections limit 超过最大值，已限制", gin.H{
+			"requested": limit,
+			"max":       maxLimit,
+		})
 	}
 
 	offset, err := strconv.Atoi(offsetStr)
-	if err != nil {
+	if err != nil || offset < 0 {
 		offset = 0
 	}
 

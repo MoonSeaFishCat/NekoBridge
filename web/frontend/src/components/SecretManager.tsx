@@ -59,18 +59,35 @@ const SecretManager: React.FC = () => {
   const loadData = useCallback(async () => {
     try {
       setLoading(true);
-      const [secretsData, statsData] = await Promise.all([
+      // 并行加载秘密和统计信息，但使用 Promise.allSettled 以防止一个失败影响其他
+      const results = await Promise.allSettled([
         apiService.getSecrets(),
         apiService.getSecretStats(),
       ]);
-      setSecrets(secretsData.data?.secrets || []);
-      setStats(statsData.data?.stats || stats);
+      
+      if (results[0].status === 'fulfilled') {
+        setSecrets(results[0].value.data?.secrets || []);
+      } else {
+        console.error('加载密钥失败:', results[0].reason);
+      }
+      
+      if (results[1].status === 'fulfilled') {
+        setStats(results[1].value.data?.stats || {
+          total: 0,
+          enabled: 0,
+          disabled: 0,
+          recently_used: 0,
+          never_used: 0,
+        });
+      } else {
+        console.error('加载统计失败:', results[1].reason);
+      }
     } catch (error) {
-      console.error('加载数据失败');
+      console.error('加载数据失败:', error);
     } finally {
       setLoading(false);
     }
-  }, [stats]);
+  }, []);  // 移除 stats 依赖，避免无限循环
 
   useEffect(() => {
     loadData();

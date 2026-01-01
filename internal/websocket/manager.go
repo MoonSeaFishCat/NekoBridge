@@ -41,37 +41,40 @@ func (m *Manager) AddConnection(secret string, conn *websocket.Conn) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	// 检查连接数限制
-	currentCount := len(m.connections)
-	if currentCount >= m.config.Security.MaxConnectionsPerSecret {
-		log.Printf("WebSocket连接拒绝 [%s]: 达到最大连接数限制 (%d/%d)", secret, currentCount, m.config.Security.MaxConnectionsPerSecret)
-		return ErrMaxConnectionsReached
-	}
-
-	// 关闭旧连接
+	// 检查连接数限制 - 注意：这里检查的是 map 中的当前连接数
+	// 因为只有一个 secret 可以连接一次（被新连接替代），所以不需要额外的全局限制
+	
+	// 关闭旧连接（如果存在）
 	if oldConn, exists := m.connections[secret]; exists {
 		log.Printf("WebSocket连接 [%s] 已存在，正在关闭旧连接", secret)
-		oldConn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseServiceRestart, "新连接已建立，关闭旧连接"))
-		oldConn.Close()
+		// 发送关闭通知（不阻塞，使用 goroutine）
+		go func() {
+			oldConn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseServiceRestart, "新连接已建立，关闭旧连接"))
+			oldConn.Close()
+		}()
+		// 删除旧的写锁
+		delete(m.writeMus, secret)
 	}
 
+	// 添加新连接和对应的写锁
 	m.connections[secret] = conn
 	m.writeMus[secret] = &sync.Mutex{}
 	m.totalConnections++ // 增加累计连接数
 	log.Printf("WebSocket连接已建立: %s (当前总连接数: %d, 累计连接数: %d)", secret, len(m.connections), m.totalConnections)
 
-	// 发送连接确认
-	message := models.WebSocketMessage{
-		Type: "connected",
-		Data: map[string]interface{}{
-			"secret":    secret,
-			"timestamp": time.Now().Format(time.RFC3339),
-		},
-	}
-
-	if err := m.sendMessage(secret, message); err != nil {
-		log.Printf("发送连接确认消息失败 [%s]: %v", secret, err)
-	}
+	// 发送连接确认（不阻塞，防止卡住 AddConnection）
+	go func() {
+		message := models.WebSocketMessage{
+			Type: "connected",
+			Data: map[string]interface{}{
+				"secret":    secret,
+				"timestamp": time.Now().Format(time.RFC3339),
+			},
+		}
+		if err := m.sendMessage(secret, message); err != nil {
+			log.Printf("发送连接确认消息失败 [%s]: %v", secret, err)
+		}
+	}()
 
 	return nil
 }
@@ -107,29 +110,51 @@ func (m *Manager) SendMessage(secret string, message models.WebSocketMessage) er
 // Broadcast 广播消息到所有连接
 func (m *Manager) Broadcast(message models.WebSocketMessage) {
 	m.mu.RLock()
-	defer m.mu.RUnlock()
-
+	// 复制所有 secret 列表以避免在遍历时 map 被修改
+	secrets := make([]string, 0, len(m.connections))
 	for secret := range m.connections {
-		if err := m.sendMessage(secret, message); err != nil {
-			log.Printf("广播消息失败 [%s]: %v", secret, err)
-		}
+		secrets = append(secrets, secret)
+	}
+	m.mu.RUnlock()
+
+	// 在持有锁之外进行实际的消息发送（异步）
+	for _, secret := range secrets {
+		go func(s string) {
+			if err := m.SendMessage(s, message); err != nil {
+				log.Printf("广播消息失败 [%s]: %v", s, err)
+			}
+		}(secret)
 	}
 }
 
 // sendMessage 发送消息的内部方法
+// 注意: 必须在持有管理器锁的情况下调用，或者在 RLock 后立即调用，但不能在 RUnlock 后访问 conn
 func (m *Manager) sendMessage(secret string, message models.WebSocketMessage) error {
+	// 这个方法在持有读锁的情况下被调用，但我们需要重新检查并获取写锁
+	// 为了避免竞态条件，我们需要一个机制
+	
+	// 尝试获取写锁（如果不存在则返回错误）
 	m.mu.RLock()
-	conn, exists := m.connections[secret]
+	conn, connExists := m.connections[secret]
 	writeMu, muExists := m.writeMus[secret]
 	m.mu.RUnlock()
 
-	if !exists || !muExists {
+	if !connExists || !muExists {
 		return ErrConnectionNotFound
 	}
 
 	// 使用连接专用的写锁，确保同一连接的消息按顺序发送且不发生并发写冲突
 	writeMu.Lock()
 	defer writeMu.Unlock()
+
+	// 在持有写锁后再次检查连接是否仍然存在（防止被其他 goroutine 删除）
+	m.mu.RLock()
+	currentConn, stillExists := m.connections[secret]
+	m.mu.RUnlock()
+	
+	if !stillExists || currentConn != conn {
+		return ErrConnectionNotFound
+	}
 
 	var err error
 	// 根据消息格式选择发送方式
@@ -217,37 +242,76 @@ func (m *Manager) GetConnection(secret string) (*websocket.Conn, bool) {
 	return conn, exists
 }
 
-// GetConnections 获取所有连接信息
+// GetConnections 获取所有连接信息 (优化版本)
 func (m *Manager) GetConnections(limit, offset int) ([]models.Connection, int) {
-	// 先获取所有连接的快照，尽量减少锁持有时间
+	// 输入验证和限制
+	if limit <= 0 || limit > 200 {
+		limit = 50
+	}
+	if offset < 0 {
+		offset = 0
+	}
+
 	m.mu.RLock()
 	total := len(m.connections)
-	
+
 	// 如果没有连接，直接返回
 	if total == 0 {
 		m.mu.RUnlock()
 		return []models.Connection{}, 0
 	}
 
-	// 提取所有密钥并进行分页处理
-	secrets := make([]string, 0, total)
+	// 快速路径：只提取需要的部分秘密（避免提取所有秘密）
+	secrets := make([]string, 0, limit)
+	idx := 0
 	for secret := range m.connections {
-		secrets = append(secrets, secret)
+		if idx >= offset && idx < offset+limit {
+			secrets = append(secrets, secret)
+		}
+		idx++
+		if idx >= offset+limit {
+			break
+		}
 	}
 	m.mu.RUnlock()
 
-	// 简单的分页逻辑
-	start := offset
-	if start >= total {
-		return []models.Connection{}, total
-	}
-	
-	end := start + limit
-	if end > total {
-		end = total
+	// 获取配置快照（在管理器锁之外获取配置锁，避免死锁）
+	var secretConfigs map[string]config.SecretConfig
+	if m.config != nil {
+		secretConfigs = m.config.GetSecrets()
 	}
 
-	pagedSecrets := secrets[start:end]
+	// 构建连接对象列表
+	connections := make([]models.Connection, 0, len(secrets))
+	now := time.Now()
+
+	m.mu.RLock()
+	for _, secret := range secrets {
+		conn, exists := m.connections[secret]
+		if !exists {
+			continue
+		}
+
+		connection := models.Connection{
+			Secret:      secret,
+			Connected:   conn != nil,
+			ConnectedAt: now,
+		}
+
+		// 从预加载的配置中获取更多信息
+		if secretCfg, exists := secretConfigs[secret]; exists {
+			connection.Enabled = secretCfg.Enabled
+			connection.Description = secretCfg.Description
+			connection.CreatedAt = &secretCfg.CreatedAt
+			connection.LastUsed = secretCfg.LastUsed
+		}
+
+		connections = append(connections, connection)
+	}
+	m.mu.RUnlock()
+
+	return connections, total
+}
 
 	// 获取配置快照（在管理器锁之外获取配置锁）
 	var secretConfigs map[string]config.SecretConfig
@@ -289,24 +353,40 @@ func (m *Manager) GetConnections(limit, offset int) ([]models.Connection, int) {
 // BroadcastBinary 广播二进制消息到所有连接
 func (m *Manager) BroadcastBinary(data []byte) {
 	m.mu.RLock()
-	defer m.mu.RUnlock()
+	// 复制所有 secret 列表以避免在遍历时 map 被修改
+	secrets := make([]string, 0, len(m.connections))
+	for secret := range m.connections {
+		secrets = append(secrets, secret)
+	}
+	m.mu.RUnlock()
 
-	for secret, conn := range m.connections {
-		if err := conn.WriteMessage(websocket.BinaryMessage, data); err != nil {
-			log.Printf("广播二进制消息失败 [%s]: %v", secret, err)
-		}
+	// 在持有锁之外进行实际的消息发送
+	for _, secret := range secrets {
+		go func(s string) {
+			if err := m.SendBinaryMessage(s, data); err != nil {
+				log.Printf("广播二进制消息失败 [%s]: %v", s, err)
+			}
+		}(secret)
 	}
 }
 
 // BroadcastText 广播文本消息到所有连接
 func (m *Manager) BroadcastText(text string) {
 	m.mu.RLock()
-	defer m.mu.RUnlock()
+	// 复制所有 secret 列表以避免在遍历时 map 被修改
+	secrets := make([]string, 0, len(m.connections))
+	for secret := range m.connections {
+		secrets = append(secrets, secret)
+	}
+	m.mu.RUnlock()
 
-	for secret, conn := range m.connections {
-		if err := conn.WriteMessage(websocket.TextMessage, []byte(text)); err != nil {
-			log.Printf("广播文本消息失败 [%s]: %v", secret, err)
-		}
+	// 在持有锁之外进行实际的消息发送
+	for _, secret := range secrets {
+		go func(s string) {
+			if err := m.SendTextMessage(s, text); err != nil {
+				log.Printf("广播文本消息失败 [%s]: %v", s, err)
+			}
+		}(secret)
 	}
 }
 
@@ -359,6 +439,7 @@ func (m *Manager) IsConnected(secret string) bool {
 // StartHeartbeat 启动心跳检测
 func (m *Manager) StartHeartbeat() {
 	if m.config == nil || !m.config.WebSocket.EnableHeartbeat {
+		log.Println("WebSocket 心跳检测已禁用")
 		return
 	}
 
@@ -367,8 +448,17 @@ func (m *Manager) StartHeartbeat() {
 		interval = 30 * time.Second
 	}
 
+	// 心跳超时（收不到 Pong 响应后的等待时间）
+	heartbeatTimeout := time.Duration(m.config.WebSocket.HeartbeatTimeout) * time.Millisecond
+	if heartbeatTimeout <= 0 {
+		heartbeatTimeout = 5 * time.Second
+	}
+
+	log.Printf("启动 WebSocket 心跳检测 (间隔: %v, 超时: %v)", interval, heartbeatTimeout)
+
 	ticker := time.NewTicker(interval)
 	go func() {
+		defer ticker.Stop()
 		for range ticker.C {
 			m.mu.RLock()
 			// 复制连接列表以避免长时间持有读锁
@@ -387,16 +477,21 @@ func (m *Manager) StartHeartbeat() {
 			}
 			m.mu.RUnlock()
 
+			// 对每个连接发送心跳
 			for _, ci := range conns {
 				go func(info connInfo) {
 					info.writeMu.Lock()
 					defer info.writeMu.Unlock()
 					
-					// 设置写入超时
-					info.conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
+					// 设置写入超时，确保心跳不会阻塞
+					info.conn.SetWriteDeadline(time.Now().Add(heartbeatTimeout))
 					if err := info.conn.WriteMessage(websocket.PingMessage, nil); err != nil {
-						log.Printf("心跳发送失败，关闭连接 [%s]: %v", info.secret, err)
-						m.RemoveConnection(info.secret)
+						log.Printf("心跳发送失败 [%s]: %v，移除连接", info.secret, err)
+						// 异步移除，避免死锁
+						go m.RemoveConnection(info.secret)
+					} else {
+						// 清除写超时，恢复正常操作
+						info.conn.SetWriteDeadline(time.Time{})
 					}
 				}(ci)
 			}

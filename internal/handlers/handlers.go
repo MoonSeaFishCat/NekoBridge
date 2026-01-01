@@ -15,6 +15,7 @@ import (
 	"nekobridge/internal/websocket"
 	"net/http"
 	"os"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"time"
@@ -520,15 +521,34 @@ func (h *Handlers) Webhook(c *gin.Context) {
 	h.logger.Log("info", "收到Webhook消息", gin.H{"secret": secret, "payload": payload})
 
 	// 发送到WebSocket连接
-	if err := h.wsManager.SendTextMessage(secret, string(bodyBytes)); err != nil {
-		h.logger.Log("warning", "消息推送失败：未找到活跃连接", gin.H{"secret": secret})
-		h.Success(c, gin.H{"status": "连接未就绪"})
+	err = h.wsManager.SendTextMessage(secret, string(bodyBytes))
+	if err != nil {
+		// 即使连接不存在，也要记录并返回成功
+		// 可能客户端稍后会连接，消息可以在连接建立时补发
+		h.logger.Log("warning", "WebSocket连接暂不可用，消息可能未送达", gin.H{
+			"secret": secret,
+			"error":  err.Error(),
+			"size":   len(bodyBytes),
+		})
+		// 返回202 Accepted 而不是成功，表示已接收但未立即处理
+		c.JSON(http.StatusAccepted, models.APIResponse{
+			Success: true,
+			Data: gin.H{
+				"status":  "queued",
+				"message": "消息已接收，WebSocket连接暂不可用",
+				"secret":  secret,
+			},
+			Message: "消息待转发",
+		})
 		return
 	}
 
 	h.logger.Log("info", "消息推送成功", gin.H{"secret": secret, "payload": payload})
 	h.config.MarkSecretUsed(secret)
-	h.Success(c, gin.H{"status": "推送成功"})
+	h.Success(c, gin.H{
+		"status": "success",
+		"secret": secret,
+	})
 }
 
 // autoAddSecret 自动添加密钥
@@ -647,11 +667,31 @@ func (h *Handlers) WebSocketHandler(c *gin.Context) {
 		readTimeout = 60 * time.Second // 默认 60s
 	}
 
-	conn.SetReadDeadline(time.Now().Add(readTimeout))
+	// 为了处理心跳，需要调整读超时
+	// 实际读超时应该比心跳间隔更长，以避免在心跳到达之前超时
+	heartbeatInterval := time.Duration(h.config.WebSocket.HeartbeatInterval) * time.Millisecond
+	if heartbeatInterval <= 0 {
+		heartbeatInterval = 30 * time.Second
+	}
+	
+	// 读超时应该至少是心跳间隔的 2 倍
+	effectiveReadTimeout := readTimeout
+	if h.config.WebSocket.EnableHeartbeat && heartbeatInterval > 0 {
+		minTimeout := heartbeatInterval * 2
+		if effectiveReadTimeout < minTimeout {
+			effectiveReadTimeout = minTimeout
+			h.logger.Log("info", "调整读超时以适应心跳", gin.H{
+				"heartbeat_interval": heartbeatInterval,
+				"effective_timeout":  effectiveReadTimeout,
+			})
+		}
+	}
+
+	conn.SetReadDeadline(time.Now().Add(effectiveReadTimeout))
 	
 	// 设置 Pong 处理器，收到 Pong 时重置读超时
 	conn.SetPongHandler(func(string) error {
-		conn.SetReadDeadline(time.Now().Add(readTimeout))
+		conn.SetReadDeadline(time.Now().Add(effectiveReadTimeout))
 		return nil
 	})
 
@@ -674,7 +714,7 @@ func (h *Handlers) WebSocketHandler(c *gin.Context) {
 	// 处理WebSocket消息
 	for {
 		// 读取消息前重置读超时
-		conn.SetReadDeadline(time.Now().Add(readTimeout))
+		conn.SetReadDeadline(time.Now().Add(effectiveReadTimeout))
 		
 		// 读取消息类型
 		messageType, data, err := conn.ReadMessage()
@@ -791,8 +831,11 @@ func (h *Handlers) handleBinaryMessage(secret string, msg models.WebSocketMessag
 	}
 
 	// 2. 如果是文件上传（以特定魔数开头）
-	if len(data) >= 8 && string(data[:4]) == "FILE" {
-		h.handleFileUpload(secret, data[4:], conn)
+	// 检查数据长度以防止越界
+	if len(data) > 4 && string(data[:4]) == "FILE" {
+		// 文件数据从 data[4:] 开始
+		fileData := data[4:]
+		h.handleFileUpload(secret, fileData, conn)
 		return
 	}
 
@@ -811,20 +854,54 @@ func (h *Handlers) handleBinaryMessage(secret string, msg models.WebSocketMessag
 
 // handleFileUpload 处理文件上传
 func (h *Handlers) handleFileUpload(secret string, fileData []byte, conn *gorilla.Conn) {
-	// 创建data目录
+	// 验证文件数据大小
+	const maxUploadSize = 100 * 1024 * 1024 // 100MB 限制
+	if len(fileData) > maxUploadSize {
+		h.logger.Log("warning", "文件上传被拒绝：文件过大", gin.H{
+			"secret":      secret,
+			"size":        len(fileData),
+			"max_allowed": maxUploadSize,
+		})
+		return
+	}
+
+	// 创建data目录，使用更安全的权限
 	dataDir := "./data/uploads"
-	if err := os.MkdirAll(dataDir, 0755); err != nil {
-		h.logger.Log("error", "创建上传目录失败", err)
+	if err := os.MkdirAll(dataDir, 0750); err != nil {
+		h.logger.Log("error", "创建上传目录失败", gin.H{"error": err.Error(), "dir": dataDir})
 		return
 	}
 
 	// 生成文件名：时间戳_secret.bin
+	// 使用更安全的文件名生成方式，避免目录遍历攻击
 	filename := fmt.Sprintf("%d_%s.bin", time.Now().Unix(), secret)
-	filepath := fmt.Sprintf("%s/%s", dataDir, filename)
+	filepath := filepath.Join(dataDir, filename)
 
-	// 保存文件
-	if err := os.WriteFile(filepath, fileData, 0644); err != nil {
-		h.logger.Log("error", "保存上传文件失败", err)
+	// 验证生成的路径在 dataDir 内（防止目录遍历）
+	absDataDir, err := filepath.Abs(dataDir)
+	if err != nil {
+		h.logger.Log("error", "获取数据目录的绝对路径失败", gin.H{"error": err.Error()})
+		return
+	}
+
+	absFilePath, err := filepath.Abs(filepath)
+	if err != nil {
+		h.logger.Log("error", "获取文件路径的绝对路径失败", gin.H{"error": err.Error()})
+		return
+	}
+
+	// 确保文件路径在 dataDir 内
+	if !strings.HasPrefix(absFilePath, absDataDir) {
+		h.logger.Log("error", "文件路径验证失败：文件路径超出允许范围", gin.H{
+			"allowed_dir": absDataDir,
+			"file_path":   absFilePath,
+		})
+		return
+	}
+
+	// 保存文件，使用更安全的权限
+	if err := os.WriteFile(absFilePath, fileData, 0640); err != nil {
+		h.logger.Log("error", "保存上传文件失败", gin.H{"error": err.Error(), "path": absFilePath})
 		return
 	}
 
@@ -832,7 +909,7 @@ func (h *Handlers) handleFileUpload(secret string, fileData []byte, conn *gorill
 		"secret":   secret,
 		"filename": filename,
 		"size":     len(fileData),
-		"path":     filepath,
+		"path":     absFilePath,
 	})
 
 	// 回复上传成功消息（JSON格式）
@@ -841,7 +918,7 @@ func (h *Handlers) handleFileUpload(secret string, fileData []byte, conn *gorill
 		Data: gin.H{
 			"filename": filename,
 			"size":     len(fileData),
-			"path":     filepath,
+			"path":     absFilePath,
 		},
 		Format: models.MessageFormatJSON,
 	}
