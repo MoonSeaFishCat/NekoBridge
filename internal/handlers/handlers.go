@@ -673,7 +673,7 @@ func (h *Handlers) WebSocketHandler(c *gin.Context) {
 	if heartbeatInterval <= 0 {
 		heartbeatInterval = 30 * time.Second
 	}
-	
+
 	// 读超时应该至少是心跳间隔的 2 倍
 	effectiveReadTimeout := readTimeout
 	if h.config.WebSocket.EnableHeartbeat && heartbeatInterval > 0 {
@@ -688,7 +688,7 @@ func (h *Handlers) WebSocketHandler(c *gin.Context) {
 	}
 
 	conn.SetReadDeadline(time.Now().Add(effectiveReadTimeout))
-	
+
 	// 设置 Pong 处理器，收到 Pong 时重置读超时
 	conn.SetPongHandler(func(string) error {
 		conn.SetReadDeadline(time.Now().Add(effectiveReadTimeout))
@@ -715,7 +715,7 @@ func (h *Handlers) WebSocketHandler(c *gin.Context) {
 	for {
 		// 读取消息前重置读超时
 		conn.SetReadDeadline(time.Now().Add(effectiveReadTimeout))
-		
+
 		// 读取消息类型
 		messageType, data, err := conn.ReadMessage()
 		if err != nil {
@@ -875,7 +875,7 @@ func (h *Handlers) handleFileUpload(secret string, fileData []byte, conn *gorill
 	// 生成文件名：时间戳_secret.bin
 	// 使用更安全的文件名生成方式，避免目录遍历攻击
 	filename := fmt.Sprintf("%d_%s.bin", time.Now().Unix(), secret)
-	filepath := filepath.Join(dataDir, filename)
+	targetPath := filepath.Join(dataDir, filename)
 
 	// 验证生成的路径在 dataDir 内（防止目录遍历）
 	absDataDir, err := filepath.Abs(dataDir)
@@ -884,7 +884,7 @@ func (h *Handlers) handleFileUpload(secret string, fileData []byte, conn *gorill
 		return
 	}
 
-	absFilePath, err := filepath.Abs(filepath)
+	absFilePath, err := filepath.Abs(targetPath)
 	if err != nil {
 		h.logger.Log("error", "获取文件路径的绝对路径失败", gin.H{"error": err.Error()})
 		return

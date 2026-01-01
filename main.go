@@ -58,9 +58,30 @@ func main() {
 
 	// 配置CORS
 	corsConfig := cors.DefaultConfig()
-	corsConfig.AllowOrigins = cfg.Server.CORS.Origins
-	corsConfig.AllowCredentials = true
-	corsConfig.AllowHeaders = []string{"Origin", "Content-Length", "Content-Type", "Authorization"}
+	
+	// 如果配置了 * 且启用了 Credentials，需要特殊处理
+	hasWildcard := false
+	for _, origin := range cfg.Server.CORS.Origins {
+		if origin == "*" {
+			hasWildcard = true
+			break
+		}
+	}
+
+	if hasWildcard && cfg.Server.CORS.AllowCredentials {
+		// 当 AllowCredentials 为 true 时，AllowOrigins 不能为 *
+		// 我们可以允许所有来源，但需要通过函数动态返回
+		corsConfig.AllowAllOrigins = true
+	} else {
+		corsConfig.AllowOrigins = cfg.Server.CORS.Origins
+	}
+
+	corsConfig.AllowCredentials = cfg.Server.CORS.AllowCredentials
+	corsConfig.AllowHeaders = []string{"Origin", "Content-Length", "Content-Type", "Authorization", "Accept", "X-Requested-With"}
+	corsConfig.AllowMethods = []string{"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"}
+	corsConfig.ExposeHeaders = []string{"Content-Length"}
+	corsConfig.MaxAge = 12 * time.Hour
+	
 	r.Use(cors.New(corsConfig))
 
 	// 设置受信任的代理（解决GIN警告并支持获取真实IP）

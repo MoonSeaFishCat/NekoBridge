@@ -42,7 +42,8 @@ type SSLConfig struct {
 
 // CORSConfig CORS配置
 type CORSConfig struct {
-	Origins []string `mapstructure:"origins"`
+	Origins          []string `mapstructure:"origins"`
+	AllowCredentials bool     `mapstructure:"allow_credentials"`
 }
 
 // SecurityConfig 安全配置
