@@ -14,17 +14,19 @@ import (
 
 // Manager WebSocket连接管理器
 type Manager struct {
-	connections map[string]*websocket.Conn
-	mu          sync.RWMutex
-	writeMus    map[string]*sync.Mutex // 每个连接独立的写锁，防止并发写导致连接关闭或消息丢失
-	config      *config.Config
+	connections      map[string]*websocket.Conn
+	mu               sync.RWMutex
+	writeMus         map[string]*sync.Mutex // 每个连接独立的写锁，防止并发写导致连接关闭或消息丢失
+	config           *config.Config
+	totalConnections int64 // 累计连接总数
 }
 
 // NewManager 创建新的WebSocket管理器
 func NewManager() *Manager {
 	m := &Manager{
-		connections: make(map[string]*websocket.Conn),
-		writeMus:    make(map[string]*sync.Mutex),
+		connections:      make(map[string]*websocket.Conn),
+		writeMus:         make(map[string]*sync.Mutex),
+		totalConnections: 0,
 	}
 	return m
 }
@@ -55,7 +57,8 @@ func (m *Manager) AddConnection(secret string, conn *websocket.Conn) error {
 
 	m.connections[secret] = conn
 	m.writeMus[secret] = &sync.Mutex{}
-	log.Printf("WebSocket连接已建立: %s (当前总连接数: %d)", secret, len(m.connections))
+	m.totalConnections++ // 增加累计连接数
+	log.Printf("WebSocket连接已建立: %s (当前总连接数: %d, 累计连接数: %d)", secret, len(m.connections), m.totalConnections)
 
 	// 发送连接确认
 	message := models.WebSocketMessage{
@@ -278,6 +281,14 @@ func (m *Manager) GetConnectionCount() int {
 	defer m.mu.RUnlock()
 
 	return len(m.connections)
+}
+
+// GetTotalConnections 获取累计连接总数
+func (m *Manager) GetTotalConnections() int {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	return int(m.totalConnections)
 }
 
 // KickConnection 踢出连接
