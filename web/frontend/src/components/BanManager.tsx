@@ -5,7 +5,6 @@ import {
   Button,
   Space,
   Popconfirm,
-  Badge,
   Dialog,
   Form,
   Input,
@@ -19,7 +18,8 @@ import {
   Statistic,
   Checkbox,
 } from 'tdesign-react';
-import { MessagePlugin } from 'tdesign-react';
+import { useData } from '../contexts/DataContext';
+import { useToast } from '../hooks/useToast';
 import {
   AddIcon,
   RefreshIcon,
@@ -53,11 +53,9 @@ interface BanStats {
   thisWeek: number;
 }
 
-interface BanManagerProps {
-  onRefresh?: () => void;
-}
-
-function BanManager({ onRefresh }: BanManagerProps) {
+function BanManager() {
+  const { refreshData } = useData();
+  const { success: showSuccess, error: showError } = useToast();
   const [loading, setLoading] = useState(false);
   const [bans, setBans] = useState<BanInfo[]>([]);
   const [stats, setStats] = useState<BanStats>({
@@ -85,25 +83,25 @@ function BanManager({ onRefresh }: BanManagerProps) {
     setLoading(true);
     try {
       const response = await api.getBlockedSecrets();
-      setBans(response.bans || []);
+      const banList = response.data?.bans || [];
+      setBans(banList);
       
       // 计算统计信息
-      const banList = response.bans || [];
       const now = new Date();
       const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
       const weekAgo = new Date(today.getTime() - 7 * 24 * 60 * 60 * 1000);
       
       const stats: BanStats = {
         total: banList.length,
-        active: banList.filter(ban => (ban as any).isActive === true).length,
-        inactive: banList.filter(ban => (ban as any).isActive === false).length,
-        today: banList.filter(ban => new Date(ban.bannedAt) >= today).length,
-        thisWeek: banList.filter(ban => new Date(ban.bannedAt) >= weekAgo).length,
+        active: banList.filter((ban: any) => ban.isActive === true).length,
+        inactive: banList.filter((ban: any) => ban.isActive === false).length,
+        today: banList.filter((ban: any) => new Date(ban.bannedAt) >= today).length,
+        thisWeek: banList.filter((ban: any) => new Date(ban.bannedAt) >= weekAgo).length,
       };
       setStats(stats);
     } catch (error) {
       console.error('Failed to load bans:', error);
-      MessagePlugin.error('加载封禁列表失败: ' + ((error as any)?.message || '未知错误'));
+      showError('加载封禁列表失败: ' + ((error as any)?.message || '未知错误'));
     } finally {
       setLoading(false);
     }
@@ -112,24 +110,24 @@ function BanManager({ onRefresh }: BanManagerProps) {
   const handleUnblock = async (secret: string) => {
     try {
       await api.unblockSecret(secret);
-      MessagePlugin.success(`已解除封禁: ${secret}`);
+      showSuccess(`已解除封禁: ${secret}`);
       loadBans();
-      onRefresh?.();
+      refreshData();
     } catch (error) {
-      MessagePlugin.error('解除封禁失败');
+      showError('解除封禁失败');
     }
   };
 
   const handleBlock = async (values: { secret: string; reason?: string }) => {
     try {
       await api.blockSecret(values.secret, values.reason);
-      MessagePlugin.success(`已封禁密钥: ${values.secret}`);
+      showSuccess(`已封禁密钥: ${values.secret}`);
       setAddModalVisible(false);
       addForm.reset();
       loadBans();
-      onRefresh?.();
+      refreshData();
     } catch (error) {
-      MessagePlugin.error('封禁失败');
+      showError('封禁失败');
     }
   };
 
@@ -138,31 +136,31 @@ function BanManager({ onRefresh }: BanManagerProps) {
     
     try {
       await api.updateBanRecord(editingBan.id || 0, values.reason || '');
-      MessagePlugin.success('封禁记录更新成功');
+      showSuccess('封禁记录更新成功');
       setEditModalVisible(false);
       setEditingBan(null);
       editForm.reset();
       loadBans();
-      onRefresh?.();
+      refreshData();
     } catch (error) {
-      MessagePlugin.error('更新失败');
+      showError('更新失败');
     }
   };
 
   const handleDelete = async (id: number) => {
     try {
       await api.deleteBanRecord(id);
-      MessagePlugin.success('封禁记录删除成功');
+      showSuccess('封禁记录删除成功');
       loadBans();
-      onRefresh?.();
+      refreshData();
     } catch (error) {
-      MessagePlugin.error('删除失败');
+      showError('删除失败');
     }
   };
 
   const handleBatchOperation = async (values: { operation: string }) => {
     if (selectedBans.length === 0) {
-      MessagePlugin.warning('请选择要操作的记录');
+      showError('请选择要操作的记录');
       return;
     }
 
@@ -180,14 +178,14 @@ function BanManager({ onRefresh }: BanManagerProps) {
       });
 
       await Promise.all(promises);
-      MessagePlugin.success(`批量${values.operation}操作完成`);
+      showSuccess(`批量${values.operation}操作完成`);
       setBatchModalVisible(false);
       setSelectedBans([]);
       batchForm.reset();
       loadBans();
-      onRefresh?.();
+      refreshData();
     } catch (error) {
-      MessagePlugin.error('批量操作失败');
+      showError('批量操作失败');
     }
   };
 
@@ -264,9 +262,12 @@ function BanManager({ onRefresh }: BanManagerProps) {
       width: 120,
       ellipsis: true,
       cell: ({ row }: { row: BanInfo }) => (
-        <Badge color={row.isActive === true ? 'red' : 'green'}>
+        <Tag
+          theme={row.isActive === true ? 'danger' : 'success'}
+          variant="light"
+        >
           {row.isActive === true ? '已封禁' : '已解封'}
-        </Badge>
+        </Tag>
       ),
     },
     {

@@ -28,7 +28,7 @@ func (h *Handlers) GetLogs(c *gin.Context) {
 
 	logs := h.logger.GetLogs(limit, level)
 
-	c.JSON(http.StatusOK, gin.H{
+	h.Success(c, gin.H{
 		"logs":  logs,
 		"total": h.logger.GetLogCount(),
 	})
@@ -38,7 +38,7 @@ func (h *Handlers) GetLogs(c *gin.Context) {
 func (h *Handlers) GetConnections(c *gin.Context) {
 	connections := h.wsManager.GetConnections()
 
-	c.JSON(http.StatusOK, gin.H{
+	h.Success(c, gin.H{
 		"connections": connections,
 		"total":       len(connections),
 	})
@@ -49,21 +49,17 @@ func (h *Handlers) KickConnection(c *gin.Context) {
 	secret := c.Param("secret")
 
 	if err := h.wsManager.KickConnection(secret); err != nil {
-		c.JSON(http.StatusOK, models.APIResponse{
-			Success: false,
-			Message: "连接不存在或已断开",
-		})
+		h.Error(c, http.StatusNotFound, "连接不存在或已断开")
 		return
 	}
 
-	user, _ := c.Get("user")
-	claims := user.(*utils.Claims)
-	h.logger.Log("info", "管理员踢出连接", gin.H{"secret": secret, "admin": claims.Username})
+	user, exists := c.Get("user")
+	if exists {
+		claims := user.(*utils.Claims)
+		h.logger.Log("info", "管理员踢出连接", gin.H{"secret": secret, "admin": claims.Username})
+	}
 
-	c.JSON(http.StatusOK, models.APIResponse{
-		Success: true,
-		Message: "连接已断开",
-	})
+	h.Success(c, nil, "连接已断开")
 }
 
 // GetSecrets 获取密钥列表
@@ -72,9 +68,7 @@ func (h *Handlers) GetSecrets(c *gin.Context) {
 	dbSecrets, err := secretService.GetSecrets()
 	if err != nil {
 		h.logger.Log("error", "获取密钥列表失败", gin.H{"error": err.Error()})
-		c.JSON(http.StatusInternalServerError, models.APIResponse{
-			Error: "获取密钥列表失败",
-		})
+		h.Error(c, http.StatusInternalServerError, "获取密钥列表失败")
 		return
 	}
 
@@ -93,23 +87,19 @@ func (h *Handlers) GetSecrets(c *gin.Context) {
 		secrets = append(secrets, secretModel)
 	}
 
-	c.JSON(http.StatusOK, gin.H{"secrets": secrets})
+	h.Success(c, gin.H{"secrets": secrets})
 }
 
 // AddSecret 添加密钥
 func (h *Handlers) AddSecret(c *gin.Context) {
 	var req models.Secret
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, models.APIResponse{
-			Error: "无效的请求数据",
-		})
+		h.Error(c, http.StatusBadRequest, "无效的请求数据")
 		return
 	}
 
 	if req.Secret == "" {
-		c.JSON(http.StatusBadRequest, models.APIResponse{
-			Error: "密钥不能为空",
-		})
+		h.Error(c, http.StatusBadRequest, "密钥不能为空")
 		return
 	}
 
@@ -117,10 +107,15 @@ func (h *Handlers) AddSecret(c *gin.Context) {
 	secretService := &database.SecretService{}
 	existingSecret, err := secretService.GetSecret(req.Secret)
 	if err == nil && existingSecret != nil {
-		c.JSON(http.StatusConflict, models.APIResponse{
-			Error: "密钥已存在",
-		})
+		h.Error(c, http.StatusConflict, "密钥已存在")
 		return
+	}
+
+	// 获取当前管理员
+	adminUser := "admin"
+	if user, exists := c.Get("user"); exists {
+		claims := user.(*utils.Claims)
+		adminUser = claims.Username
 	}
 
 	// 创建数据库记录
@@ -130,14 +125,12 @@ func (h *Handlers) AddSecret(c *gin.Context) {
 		Description:    req.Description,
 		Enabled:        req.Enabled,
 		MaxConnections: req.MaxConnections,
-		CreatedBy:      "admin", // 这里可以从JWT中获取用户名
+		CreatedBy:      adminUser,
 	}
 
 	if err := secretService.CreateSecret(secretRecord); err != nil {
 		h.logger.Log("error", "创建密钥失败", gin.H{"error": err.Error()})
-		c.JSON(http.StatusInternalServerError, models.APIResponse{
-			Error: "创建密钥失败",
-		})
+		h.Error(c, http.StatusInternalServerError, "创建密钥失败")
 		return
 	}
 
@@ -149,9 +142,9 @@ func (h *Handlers) AddSecret(c *gin.Context) {
 	}
 
 	h.config.AddSecret(req.Secret, secretConfig)
-	h.logger.Log("info", "新增密钥", gin.H{"secret": req.Secret, "description": req.Description})
+	h.logger.Log("info", "新增密钥", gin.H{"secret": req.Secret, "description": req.Description, "admin": adminUser})
 
-	c.JSON(http.StatusOK, models.APIResponse{Success: true})
+	h.Success(c, nil, "密钥已添加")
 }
 
 // UpdateSecret 更新密钥
@@ -160,9 +153,7 @@ func (h *Handlers) UpdateSecret(c *gin.Context) {
 
 	var updates config.SecretConfig
 	if err := c.ShouldBindJSON(&updates); err != nil {
-		c.JSON(http.StatusBadRequest, models.APIResponse{
-			Error: "无效的请求数据",
-		})
+		h.Error(c, http.StatusBadRequest, "无效的请求数据")
 		return
 	}
 
@@ -170,9 +161,7 @@ func (h *Handlers) UpdateSecret(c *gin.Context) {
 	secretService := &database.SecretService{}
 	secretRecord, err := secretService.GetSecret(secret)
 	if err != nil {
-		c.JSON(http.StatusNotFound, models.APIResponse{
-			Error: "密钥不存在",
-		})
+		h.Error(c, http.StatusNotFound, "密钥不存在")
 		return
 	}
 
@@ -187,9 +176,7 @@ func (h *Handlers) UpdateSecret(c *gin.Context) {
 
 	if err := secretService.UpdateSecret(secretRecord); err != nil {
 		h.logger.Log("error", "更新密钥失败", gin.H{"error": err.Error()})
-		c.JSON(http.StatusInternalServerError, models.APIResponse{
-			Error: "更新密钥失败",
-		})
+		h.Error(c, http.StatusInternalServerError, "更新密钥失败")
 		return
 	}
 
@@ -197,7 +184,7 @@ func (h *Handlers) UpdateSecret(c *gin.Context) {
 	h.config.UpdateSecret(secret, updates)
 	h.logger.Log("info", "更新密钥配置", gin.H{"secret": secret, "updates": updates})
 
-	c.JSON(http.StatusOK, models.APIResponse{Success: true})
+	h.Success(c, nil, "密钥已更新")
 }
 
 // DeleteSecret 删除密钥
@@ -208,9 +195,7 @@ func (h *Handlers) DeleteSecret(c *gin.Context) {
 	secretService := &database.SecretService{}
 	if err := secretService.DeleteSecret(secret); err != nil {
 		h.logger.Log("error", "删除密钥失败", gin.H{"error": err.Error()})
-		c.JSON(http.StatusInternalServerError, models.APIResponse{
-			Error: "删除密钥失败",
-		})
+		h.Error(c, http.StatusInternalServerError, "删除密钥失败")
 		return
 	}
 
@@ -222,7 +207,7 @@ func (h *Handlers) DeleteSecret(c *gin.Context) {
 
 	h.logger.Log("info", "删除密钥", gin.H{"secret": secret})
 
-	c.JSON(http.StatusOK, models.APIResponse{Success: true})
+	h.Success(c, nil, "密钥已删除")
 }
 
 // BlockSecret 封禁密钥
@@ -235,7 +220,11 @@ func (h *Handlers) BlockSecret(c *gin.Context) {
 	c.ShouldBindJSON(&req)
 
 	// 获取当前用户
-	user, _ := c.Get("user")
+	user, exists := c.Get("user")
+	if !exists {
+		h.Error(c, http.StatusUnauthorized, "未授权")
+		return
+	}
 	claims := user.(*utils.Claims)
 	username := claims.Username
 
@@ -243,10 +232,7 @@ func (h *Handlers) BlockSecret(c *gin.Context) {
 	secretService := &database.SecretService{}
 	secretRecord, err := secretService.GetSecret(secret)
 	if err != nil {
-		c.JSON(http.StatusNotFound, models.APIResponse{
-			Success: false,
-			Error:   "密钥不存在",
-		})
+		h.Error(c, http.StatusNotFound, "密钥不存在")
 		return
 	}
 
@@ -254,10 +240,7 @@ func (h *Handlers) BlockSecret(c *gin.Context) {
 	secretRecord.Enabled = false
 	if err := secretService.UpdateSecret(secretRecord); err != nil {
 		h.logger.Log("error", "更新密钥状态失败", err)
-		c.JSON(http.StatusInternalServerError, models.APIResponse{
-			Success: false,
-			Error:   "更新密钥状态失败",
-		})
+		h.Error(c, http.StatusInternalServerError, "更新密钥状态失败")
 		return
 	}
 
@@ -284,10 +267,7 @@ func (h *Handlers) BlockSecret(c *gin.Context) {
 		"admin":  username,
 	})
 
-	c.JSON(http.StatusOK, models.APIResponse{
-		Success: true,
-		Message: "密钥已封禁",
-	})
+	h.Success(c, nil, "密钥已封禁")
 }
 
 // UnblockSecret 解除封禁
@@ -295,7 +275,11 @@ func (h *Handlers) UnblockSecret(c *gin.Context) {
 	secret := c.Param("secret")
 
 	// 获取当前用户
-	user, _ := c.Get("user")
+	user, exists := c.Get("user")
+	if !exists {
+		h.Error(c, http.StatusUnauthorized, "未授权")
+		return
+	}
 	claims := user.(*utils.Claims)
 	username := claims.Username
 
@@ -303,10 +287,7 @@ func (h *Handlers) UnblockSecret(c *gin.Context) {
 	secretService := &database.SecretService{}
 	secretRecord, err := secretService.GetSecret(secret)
 	if err != nil {
-		c.JSON(http.StatusNotFound, models.APIResponse{
-			Success: false,
-			Error:   "密钥不存在",
-		})
+		h.Error(c, http.StatusNotFound, "密钥不存在")
 		return
 	}
 
@@ -314,18 +295,14 @@ func (h *Handlers) UnblockSecret(c *gin.Context) {
 	secretRecord.Enabled = true
 	if err := secretService.UpdateSecret(secretRecord); err != nil {
 		h.logger.Log("error", "更新密钥状态失败", err)
-		c.JSON(http.StatusInternalServerError, models.APIResponse{
-			Success: false,
-			Error:   "更新密钥状态失败",
-		})
+		h.Error(c, http.StatusInternalServerError, "更新密钥状态失败")
 		return
 	}
 
-	// 解封密钥（更新封禁记录）
+	// 更新封禁记录
 	banService := &database.BanService{}
 	if err := banService.UnbanSecret(secret, username); err != nil {
-		h.logger.Log("error", "解封密钥失败", err)
-		// 不返回错误，因为密钥已经被启用
+		h.logger.Log("error", "解除封禁记录失败", err)
 	}
 
 	h.logger.Log("info", "管理员解除封禁", gin.H{
@@ -333,10 +310,7 @@ func (h *Handlers) UnblockSecret(c *gin.Context) {
 		"admin":  username,
 	})
 
-	c.JSON(http.StatusOK, models.APIResponse{
-		Success: true,
-		Message: "密钥封禁已解除",
-	})
+	h.Success(c, nil, "密钥已解封")
 }
 
 // GetBlockedSecrets 获取封禁的密钥
@@ -347,10 +321,7 @@ func (h *Handlers) GetBlockedSecrets(c *gin.Context) {
 	activeBans, err := banService.GetActiveBans()
 	if err != nil {
 		h.logger.Log("error", "获取封禁记录失败", err)
-		c.JSON(http.StatusInternalServerError, models.APIResponse{
-			Success: false,
-			Error:   "获取封禁记录失败",
-		})
+		h.Error(c, http.StatusInternalServerError, "获取封禁记录失败")
 		return
 	}
 
@@ -389,7 +360,7 @@ func (h *Handlers) GetBlockedSecrets(c *gin.Context) {
 		Total:          len(blockedSecrets),
 	}
 
-	c.JSON(http.StatusOK, response)
+	h.Success(c, response)
 }
 
 // UpdateBanRecord 更新封禁记录
@@ -397,9 +368,7 @@ func (h *Handlers) UpdateBanRecord(c *gin.Context) {
 	idStr := c.Param("id")
 	id, err := strconv.Atoi(idStr)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, models.APIResponse{
-			Error: "无效的记录ID",
-		})
+		h.Error(c, http.StatusBadRequest, "无效的记录ID")
 		return
 	}
 
@@ -407,27 +376,21 @@ func (h *Handlers) UpdateBanRecord(c *gin.Context) {
 		Reason string `json:"reason"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, models.APIResponse{
-			Error: "无效的请求数据",
-		})
+		h.Error(c, http.StatusBadRequest, "无效的请求数据")
 		return
 	}
 
 	banService := &database.BanService{}
 	banRecord, err := banService.GetBanRecord(uint(id))
 	if err != nil {
-		c.JSON(http.StatusNotFound, models.APIResponse{
-			Error: "封禁记录不存在",
-		})
+		h.Error(c, http.StatusNotFound, "封禁记录不存在")
 		return
 	}
 
 	banRecord.Reason = req.Reason
 	if err := banService.UpdateBanRecord(banRecord); err != nil {
 		h.logger.Log("error", "更新封禁记录失败", gin.H{"error": err.Error()})
-		c.JSON(http.StatusInternalServerError, models.APIResponse{
-			Error: "更新封禁记录失败",
-		})
+		h.Error(c, http.StatusInternalServerError, "更新封禁记录失败")
 		return
 	}
 
@@ -439,10 +402,7 @@ func (h *Handlers) UpdateBanRecord(c *gin.Context) {
 		"reason": req.Reason,
 	})
 
-	c.JSON(http.StatusOK, models.APIResponse{
-		Success: true,
-		Message: "封禁记录更新成功",
-	})
+	h.Success(c, nil, "封禁记录更新成功")
 }
 
 // DeleteBanRecord 删除封禁记录
@@ -450,26 +410,20 @@ func (h *Handlers) DeleteBanRecord(c *gin.Context) {
 	idStr := c.Param("id")
 	id, err := strconv.Atoi(idStr)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, models.APIResponse{
-			Error: "无效的记录ID",
-		})
+		h.Error(c, http.StatusBadRequest, "无效的记录ID")
 		return
 	}
 
 	banService := &database.BanService{}
 	banRecord, err := banService.GetBanRecord(uint(id))
 	if err != nil {
-		c.JSON(http.StatusNotFound, models.APIResponse{
-			Error: "封禁记录不存在",
-		})
+		h.Error(c, http.StatusNotFound, "封禁记录不存在")
 		return
 	}
 
 	if err := banService.DeleteBanRecord(uint(id)); err != nil {
 		h.logger.Log("error", "删除封禁记录失败", gin.H{"error": err.Error()})
-		c.JSON(http.StatusInternalServerError, models.APIResponse{
-			Error: "删除封禁记录失败",
-		})
+		h.Error(c, http.StatusInternalServerError, "删除封禁记录失败")
 		return
 	}
 
@@ -481,10 +435,7 @@ func (h *Handlers) DeleteBanRecord(c *gin.Context) {
 		"secret": banRecord.Secret,
 	})
 
-	c.JSON(http.StatusOK, models.APIResponse{
-		Success: true,
-		Message: "封禁记录删除成功",
-	})
+	h.Success(c, nil, "封禁记录删除成功")
 }
 
 // ExportSecrets 导出密钥
@@ -525,9 +476,7 @@ func (h *Handlers) ExportSecrets(c *gin.Context) {
 func (h *Handlers) ImportSecrets(c *gin.Context) {
 	var req models.ImportData
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, models.APIResponse{
-			Error: "无效的导入数据格式",
-		})
+		h.Error(c, http.StatusBadRequest, "无效的导入数据格式")
 		return
 	}
 
@@ -569,10 +518,9 @@ func (h *Handlers) ImportSecrets(c *gin.Context) {
 		"errors":   len(result.Errors),
 	})
 
-	c.JSON(http.StatusOK, gin.H{
-		"success": true,
-		"result":  result,
-	})
+	h.Success(c, gin.H{
+		"result": result,
+	}, "密钥导入完成")
 }
 
 // GetSecretStats 获取密钥统计
@@ -605,9 +553,8 @@ func (h *Handlers) GetSecretStats(c *gin.Context) {
 		}
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"success": true,
-		"stats":   stats,
+	h.Success(c, gin.H{
+		"stats": stats,
 	})
 }
 
@@ -615,16 +562,12 @@ func (h *Handlers) GetSecretStats(c *gin.Context) {
 func (h *Handlers) BatchOperateSecrets(c *gin.Context) {
 	var req models.BatchOperationRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, models.APIResponse{
-			Error: "请提供有效的密钥列表",
-		})
+		h.Error(c, http.StatusBadRequest, "请提供有效的密钥列表")
 		return
 	}
 
 	if len(req.Secrets) == 0 {
-		c.JSON(http.StatusBadRequest, models.APIResponse{
-			Error: "请提供有效的密钥列表",
-		})
+		h.Error(c, http.StatusBadRequest, "请提供有效的密钥列表")
 		return
 	}
 
@@ -635,6 +578,13 @@ func (h *Handlers) BatchOperateSecrets(c *gin.Context) {
 	}
 
 	secretService := &database.SecretService{}
+
+	// 获取当前管理员
+	adminUser := "admin"
+	if user, exists := c.Get("user"); exists {
+		claims := user.(*utils.Claims)
+		adminUser = claims.Username
+	}
 
 	for _, secret := range req.Secrets {
 		switch req.Action {
@@ -668,7 +618,7 @@ func (h *Handlers) BatchOperateSecrets(c *gin.Context) {
 			}
 		case "block":
 			// 封禁密钥
-			if err := h.blockSecretInBatch(secret); err != nil {
+			if err := h.blockSecretInBatch(secret, adminUser); err != nil {
 				result.Errors = append(result.Errors, "密钥 "+secret+": 封禁失败 - "+err.Error())
 				result.Failed++
 			} else {
@@ -676,7 +626,7 @@ func (h *Handlers) BatchOperateSecrets(c *gin.Context) {
 			}
 		case "unblock":
 			// 解封密钥
-			if err := h.unblockSecretInBatch(secret); err != nil {
+			if err := h.unblockSecretInBatch(secret, adminUser); err != nil {
 				result.Errors = append(result.Errors, "密钥 "+secret+": 解封失败 - "+err.Error())
 				result.Failed++
 			} else {
@@ -688,34 +638,29 @@ func (h *Handlers) BatchOperateSecrets(c *gin.Context) {
 		}
 	}
 
-	user, _ := c.Get("user")
-	claims := user.(*utils.Claims)
 	h.logger.Log("info", "批量操作密钥", gin.H{
-		"admin":   claims.Username,
+		"admin":   adminUser,
 		"action":  req.Action,
 		"count":   len(req.Secrets),
 		"success": result.Success,
 		"failed":  result.Failed,
 	})
 
-	c.JSON(http.StatusOK, gin.H{
-		"success": true,
+	h.Success(c, gin.H{
 		"results": result,
-	})
+	}, "批量操作完成")
 }
 
 // GetConfig 获取配置
 func (h *Handlers) GetConfig(c *gin.Context) {
-	c.JSON(http.StatusOK, h.config)
+	h.Success(c, h.config)
 }
 
 // UpdateConfig 更新配置
 func (h *Handlers) UpdateConfig(c *gin.Context) {
 	var updates models.ConfigUpdateRequest
 	if err := c.ShouldBindJSON(&updates); err != nil {
-		c.JSON(http.StatusBadRequest, models.APIResponse{
-			Error: "无效的配置数据",
-		})
+		h.Error(c, http.StatusBadRequest, "无效的配置数据")
 		return
 	}
 
@@ -798,9 +743,7 @@ func (h *Handlers) UpdateConfig(c *gin.Context) {
 		// 如果保存失败，恢复旧配置
 		h.config.Restore(oldConfig)
 		h.logger.Log("error", "保存配置失败", err)
-		c.JSON(http.StatusInternalServerError, models.APIResponse{
-			Error: "保存配置失败",
-		})
+		h.Error(c, http.StatusInternalServerError, "保存配置失败")
 		return
 	}
 
@@ -811,10 +754,7 @@ func (h *Handlers) UpdateConfig(c *gin.Context) {
 		"updates": updates,
 	})
 
-	c.JSON(http.StatusOK, models.APIResponse{
-		Success: true,
-		Message: "配置更新成功",
-	})
+	h.Success(c, nil, "配置更新成功")
 }
 
 // GetDashboardStats 获取仪表盘统计
@@ -823,15 +763,14 @@ func (h *Handlers) GetDashboardStats(c *gin.Context) {
 
 	// 连接统计
 	stats.Connections.Active = h.wsManager.GetConnectionCount()
-	stats.Connections.Total = len(h.config.Secrets)
+	stats.Connections.Total = h.wsManager.GetTotalConnections()
 
 	// 密钥统计
 	blockedCount := 0
-	for _, config := range h.config.Secrets {
-		if !config.Enabled {
-			blockedCount++
-		}
-	}
+	banService := &database.BanService{}
+	activeBans, _ := banService.GetActiveBans()
+	blockedCount = len(activeBans)
+
 	stats.Secrets.Total = len(h.config.Secrets)
 	stats.Secrets.Blocked = blockedCount
 
@@ -842,19 +781,24 @@ func (h *Handlers) GetDashboardStats(c *gin.Context) {
 
 	// 系统统计
 	stats.System.Uptime = getUptime()
-	stats.System.Memory = int(h.cpuMonitor.GetCpuUsage()) // 简化实现
+
+	var m runtime.MemStats
+	runtime.ReadMemStats(&m)
+	// 使用系统实际分配给堆的内存作为内存指标
+	stats.System.Memory = int(m.HeapSys / 1024 / 1024) // MB
+
 	stats.System.CPU = int(h.cpuMonitor.GetCpuUsage())
 	cpuInfo := h.cpuMonitor.GetCpuInfo()
 	stats.System.CPUCores = cpuInfo.Cores
 	stats.System.CPUModel = cpuInfo.Model
 	stats.System.LoadAvg = getLoadAverage()
 
-	c.JSON(http.StatusOK, stats)
+	h.Success(c, stats)
 }
 
 // GetWebConsoleStatus 获取Web控制台状态
 func (h *Handlers) GetWebConsoleStatus(c *gin.Context) {
-	c.JSON(http.StatusOK, gin.H{
+	h.Success(c, gin.H{
 		"enabled": h.config.UI.EnableWebConsole,
 	})
 }
@@ -978,7 +922,7 @@ func (h *Handlers) GetHealth(c *gin.Context) {
 		Version:     "2.0.0",
 	}
 
-	c.JSON(http.StatusOK, health)
+	h.Success(c, health)
 }
 
 // updateSecretInDatabase 更新数据库中的密钥状态
@@ -994,7 +938,7 @@ func (h *Handlers) updateSecretInDatabase(secret string, enabled bool) error {
 }
 
 // blockSecretInBatch 批量封禁密钥
-func (h *Handlers) blockSecretInBatch(secret string) error {
+func (h *Handlers) blockSecretInBatch(secret string, admin string) error {
 	// 更新密钥状态为禁用
 	if err := h.updateSecretInDatabase(secret, false); err != nil {
 		return err
@@ -1006,7 +950,7 @@ func (h *Handlers) blockSecretInBatch(secret string) error {
 		Secret:   secret,
 		Reason:   "批量封禁操作",
 		BannedAt: time.Now(),
-		BannedBy: "admin", // 这里应该从上下文获取用户
+		BannedBy: admin,
 		IsActive: true,
 	}
 
@@ -1015,14 +959,14 @@ func (h *Handlers) blockSecretInBatch(secret string) error {
 	}
 
 	// 断开连接
-	h.wsManager.RemoveConnection(secret)
+	h.wsManager.KickConnection(secret)
 	h.config.UpdateSecret(secret, config.SecretConfig{Enabled: false})
 
 	return nil
 }
 
 // unblockSecretInBatch 批量解封密钥
-func (h *Handlers) unblockSecretInBatch(secret string) error {
+func (h *Handlers) unblockSecretInBatch(secret string, admin string) error {
 	// 更新密钥状态为启用
 	if err := h.updateSecretInDatabase(secret, true); err != nil {
 		return err
@@ -1030,24 +974,8 @@ func (h *Handlers) unblockSecretInBatch(secret string) error {
 
 	// 更新封禁记录为非活跃
 	banService := &database.BanService{}
-	banRecords, err := banService.GetBanRecords()
-	if err != nil {
+	if err := banService.UnbanSecret(secret, admin); err != nil {
 		return err
-	}
-
-	for _, record := range banRecords {
-		if record.Secret == secret && record.IsActive {
-			record.IsActive = false
-			record.UnbannedAt = &time.Time{}
-			now := time.Now()
-			record.UnbannedAt = &now
-			unbannedBy := "admin" // 这里应该从上下文获取用户
-			record.UnbannedBy = &unbannedBy
-			if err := banService.UpdateBanRecord(record); err != nil {
-				return err
-			}
-			break
-		}
 	}
 
 	h.config.UpdateSecret(secret, config.SecretConfig{Enabled: true})
@@ -1056,9 +984,7 @@ func (h *Handlers) unblockSecretInBatch(secret string) error {
 
 // saveConfigToFile 保存配置到文件
 func (h *Handlers) saveConfigToFile() error {
-	// 这里应该调用config包的保存方法
-	// 为了简化，暂时返回nil
-	return nil
+	return config.SaveConfig(h.config)
 }
 
 // GetWebSocketConfig 获取WebSocket配置
@@ -1118,9 +1044,8 @@ func (h *Handlers) GetWebSocketConfig(c *gin.Context) {
 		}
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"success": true,
-		"config":  wsConfig,
+	h.Success(c, gin.H{
+		"config": wsConfig,
 	})
 }
 
@@ -1128,9 +1053,7 @@ func (h *Handlers) GetWebSocketConfig(c *gin.Context) {
 func (h *Handlers) UpdateWebSocketConfig(c *gin.Context) {
 	var updates map[string]interface{}
 	if err := c.ShouldBindJSON(&updates); err != nil {
-		c.JSON(http.StatusBadRequest, models.APIResponse{
-			Error: "无效的配置数据",
-		})
+		h.Error(c, http.StatusBadRequest, "无效的配置数据")
 		return
 	}
 
@@ -1167,10 +1090,7 @@ func (h *Handlers) UpdateWebSocketConfig(c *gin.Context) {
 		"updates": updates,
 	})
 
-	c.JSON(http.StatusOK, models.APIResponse{
-		Success: true,
-		Message: "WebSocket配置更新成功",
-	})
+	h.Success(c, nil, "WebSocket配置更新成功")
 }
 
 // GetSystemConfig 获取系统配置
@@ -1181,16 +1101,11 @@ func (h *Handlers) GetSystemConfig(c *gin.Context) {
 	configs, err := configService.GetAllConfigs()
 	if err != nil {
 		h.logger.Log("error", "获取系统配置失败", gin.H{"error": err.Error()})
-		c.JSON(http.StatusInternalServerError, models.APIResponse{
-			Error: "获取系统配置失败",
-		})
+		h.Error(c, http.StatusInternalServerError, "获取系统配置失败")
 		return
 	}
 
-	c.JSON(http.StatusOK, models.APIResponse{
-		Success: true,
-		Data:    configs,
-	})
+	h.Success(c, configs)
 }
 
 // GetSystemConfigSchema 获取系统配置架构
@@ -1201,9 +1116,7 @@ func (h *Handlers) GetSystemConfigSchema(c *gin.Context) {
 	schema, err := configService.GetConfigSchema()
 	if err != nil {
 		h.logger.Log("error", "获取配置架构失败", gin.H{"error": err.Error()})
-		c.JSON(http.StatusInternalServerError, models.APIResponse{
-			Error: "获取配置架构失败",
-		})
+		h.Error(c, http.StatusInternalServerError, "获取配置架构失败")
 		return
 	}
 
@@ -1223,10 +1136,7 @@ func (h *Handlers) GetSystemConfigSchema(c *gin.Context) {
 		"categories": categoryInfo,
 	}
 
-	c.JSON(http.StatusOK, models.APIResponse{
-		Success: true,
-		Data:    result,
-	})
+	h.Success(c, result)
 }
 
 // getCategoryOrder 获取分类显示顺序
@@ -1249,9 +1159,7 @@ func getCategoryOrder(category string) int {
 func (h *Handlers) UpdateSystemConfig(c *gin.Context) {
 	var updates map[string]interface{}
 	if err := c.ShouldBindJSON(&updates); err != nil {
-		c.JSON(http.StatusBadRequest, models.APIResponse{
-			Error: "无效的配置数据",
-		})
+		h.Error(c, http.StatusBadRequest, "无效的配置数据")
 		return
 	}
 
@@ -1273,9 +1181,7 @@ func (h *Handlers) UpdateSystemConfig(c *gin.Context) {
 		configService := &database.ConfigService{}
 		if err := configService.BatchUpdateConfigs(dbUpdates); err != nil {
 			h.logger.Log("error", "批量更新系统配置失败", gin.H{"error": err.Error()})
-			c.JSON(http.StatusInternalServerError, models.APIResponse{
-				Error: "更新系统配置失败: " + err.Error(),
-			})
+			h.Error(c, http.StatusInternalServerError, "更新系统配置失败: "+err.Error())
 			return
 		}
 	}
@@ -1284,9 +1190,7 @@ func (h *Handlers) UpdateSystemConfig(c *gin.Context) {
 	if len(fileUpdates) > 0 {
 		if err := h.updateConfigFile(fileUpdates); err != nil {
 			h.logger.Log("error", "更新配置文件失败", gin.H{"error": err.Error()})
-			c.JSON(http.StatusInternalServerError, models.APIResponse{
-				Error: "更新配置文件失败: " + err.Error(),
-			})
+			h.Error(c, http.StatusInternalServerError, "更新配置文件失败: "+err.Error())
 			return
 		}
 	}
@@ -1301,19 +1205,14 @@ func (h *Handlers) UpdateSystemConfig(c *gin.Context) {
 		"updates": updates,
 	})
 
-	c.JSON(http.StatusOK, models.APIResponse{
-		Success: true,
-		Message: "系统配置更新成功",
-	})
+	h.Success(c, nil, "系统配置更新成功")
 }
 
 // ResetSystemConfig 重置系统配置
 func (h *Handlers) ResetSystemConfig(c *gin.Context) {
 	key := c.Param("key")
 	if key == "" {
-		c.JSON(http.StatusBadRequest, models.APIResponse{
-			Error: "配置键不能为空",
-		})
+		h.Error(c, http.StatusBadRequest, "配置键不能为空")
 		return
 	}
 
@@ -1321,9 +1220,7 @@ func (h *Handlers) ResetSystemConfig(c *gin.Context) {
 
 	if err := configService.ResetConfigToDefault(key); err != nil {
 		h.logger.Log("error", "重置配置失败", gin.H{"key": key, "error": err.Error()})
-		c.JSON(http.StatusInternalServerError, models.APIResponse{
-			Error: "重置配置失败: " + err.Error(),
-		})
+		h.Error(c, http.StatusInternalServerError, "重置配置失败: "+err.Error())
 		return
 	}
 
@@ -1334,10 +1231,7 @@ func (h *Handlers) ResetSystemConfig(c *gin.Context) {
 		"key":   key,
 	})
 
-	c.JSON(http.StatusOK, models.APIResponse{
-		Success: true,
-		Message: "配置重置成功",
-	})
+	h.Success(c, nil, "配置重置成功")
 }
 
 // InitializeSystemConfig 初始化系统配置
@@ -1346,9 +1240,7 @@ func (h *Handlers) InitializeSystemConfig(c *gin.Context) {
 
 	if err := initializer.InitializeDefaultConfigs(); err != nil {
 		h.logger.Log("error", "初始化系统配置失败", gin.H{"error": err.Error()})
-		c.JSON(http.StatusInternalServerError, models.APIResponse{
-			Error: "初始化系统配置失败: " + err.Error(),
-		})
+		h.Error(c, http.StatusInternalServerError, "初始化系统配置失败: "+err.Error())
 		return
 	}
 
@@ -1358,10 +1250,7 @@ func (h *Handlers) InitializeSystemConfig(c *gin.Context) {
 		"admin": claims.Username,
 	})
 
-	c.JSON(http.StatusOK, models.APIResponse{
-		Success: true,
-		Message: "系统配置初始化成功",
-	})
+	h.Success(c, nil, "系统配置初始化成功")
 }
 
 // updateWebSocketConfigInMemory 更新内存中的WebSocket配置

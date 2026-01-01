@@ -16,7 +16,6 @@ import {
   Statistic,
   Dialog,
   Checkbox,
-  MessagePlugin,
   Select,
   Typography,
 } from 'tdesign-react';
@@ -32,12 +31,12 @@ import {
 } from 'tdesign-icons-react';
 import { apiService } from '../services/api';
 import type { Secret, SecretStats } from '../types';
+import { useData } from '../contexts/DataContext';
+import { useToast } from '../hooks/useToast';
 
-interface SecretManagerProps {
-  onRefresh: () => void;
-}
-
-const SecretManager: React.FC<SecretManagerProps> = ({ onRefresh }) => {
+const SecretManager: React.FC = () => {
+  const { refreshData } = useData();
+  const { success: showSuccess, error: showError } = useToast();
   const [secrets, setSecrets] = useState<Secret[]>([]);
   const [stats, setStats] = useState<SecretStats>({
     total: 0,
@@ -90,14 +89,14 @@ const SecretManager: React.FC<SecretManagerProps> = ({ onRefresh }) => {
       };
       
       await apiService.addSecret(secretData);
-      MessagePlugin.success('密钥添加成功');
+      showSuccess('密钥添加成功');
       setAddVisible(false);
       addForm.reset();
       loadData();
-      onRefresh();
+      refreshData();
     } catch (error: any) {
       console.error('添加密钥错误:', error);
-      MessagePlugin.error(error.response?.data?.error || '添加失败');
+      showError(error.response?.data?.error || '添加失败');
     }
   };
 
@@ -107,14 +106,14 @@ const SecretManager: React.FC<SecretManagerProps> = ({ onRefresh }) => {
     
     try {
       await apiService.updateSecret(editingSecret.secret, values);
-      MessagePlugin.success('密钥更新成功');
+      showSuccess('密钥更新成功');
       setEditVisible(false);
       setEditingSecret(null);
       editForm.reset();
       loadData();
-      onRefresh();
+      refreshData();
     } catch (error: any) {
-      MessagePlugin.error(error.response?.data?.error || '更新失败');
+      showError(error.response?.data?.error || '更新失败');
     }
   };
 
@@ -122,11 +121,11 @@ const SecretManager: React.FC<SecretManagerProps> = ({ onRefresh }) => {
   const handleDelete = async (secret: string) => {
     try {
       await apiService.deleteSecret(secret);
-      MessagePlugin.success('密钥删除成功');
+      showSuccess('密钥删除成功');
       loadData();
-      onRefresh();
+      refreshData();
     } catch (error: any) {
-      MessagePlugin.error('删除失败');
+      showError('删除失败');
     }
   };
 
@@ -136,22 +135,22 @@ const SecretManager: React.FC<SecretManagerProps> = ({ onRefresh }) => {
       const secretData = secrets.find(s => s.secret === secret);
       if (secretData?.enabled) {
         await apiService.blockSecret(secret);
-        MessagePlugin.success('密钥已封禁');
+        showSuccess('密钥已封禁');
       } else {
         await apiService.unblockSecret(secret);
-        MessagePlugin.success('密钥已解封');
+        showSuccess('密钥已解封');
       }
       loadData();
-      onRefresh();
+      refreshData();
     } catch (error: any) {
-      MessagePlugin.error('操作失败');
+      showError('操作失败');
     }
   };
 
   // 复制密钥
   const handleCopy = (secret: string) => {
     navigator.clipboard.writeText(secret);
-    MessagePlugin.success('已复制到剪贴板');
+    showSuccess('已复制到剪贴板');
   };
 
   // 导出密钥
@@ -172,9 +171,9 @@ const SecretManager: React.FC<SecretManagerProps> = ({ onRefresh }) => {
       link.download = `secrets-${new Date().toISOString().split('T')[0]}.json`;
       link.click();
       
-      MessagePlugin.success('导出成功');
+      showSuccess('导出成功');
     } catch (error) {
-      MessagePlugin.error('导出失败');
+      showError('导出失败');
     }
   };
 
@@ -184,18 +183,18 @@ const SecretManager: React.FC<SecretManagerProps> = ({ onRefresh }) => {
       const text = await file.text();
       const data = JSON.parse(text);
       const result = await apiService.importSecrets(data);
-      MessagePlugin.success(`导入成功: ${result.result.imported} 个，跳过: ${result.result.skipped} 个`);
+      showSuccess(`导入成功: ${result.result.imported} 个，跳过: ${result.result.skipped} 个`);
       loadData();
-      onRefresh();
+      refreshData();
     } catch (error) {
-      MessagePlugin.error('导入失败');
+      showError('导入失败');
     }
   };
 
   // 批量操作
   const handleBatchOperation = async (values: { operation: string; enabled?: boolean }) => {
     if (selectedSecrets.length === 0) {
-      MessagePlugin.warning('请选择要操作的密钥');
+      showError('请选择要操作的密钥');
       return;
     }
 
@@ -225,14 +224,14 @@ const SecretManager: React.FC<SecretManagerProps> = ({ onRefresh }) => {
         unblock: '解封',
         delete: '删除'
       };
-      MessagePlugin.success(`批量${operationMap[values.operation] || values.operation}操作完成`);
+      showSuccess(`批量${operationMap[values.operation] || values.operation}操作完成`);
       setBatchVisible(false);
       setSelectedSecrets([]);
       batchForm.reset();
       loadData();
-      onRefresh();
+      refreshData();
     } catch (error) {
-      MessagePlugin.error('批量操作失败');
+      showError('批量操作失败');
     }
   };
 

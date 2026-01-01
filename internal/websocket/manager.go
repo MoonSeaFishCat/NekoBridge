@@ -316,18 +316,44 @@ func (m *Manager) StartHeartbeat() {
 		return
 	}
 
-	ticker := time.NewTicker(time.Duration(m.config.WebSocket.HeartbeatInterval) * time.Millisecond)
+	interval := time.Duration(m.config.WebSocket.HeartbeatInterval) * time.Millisecond
+	if interval <= 0 {
+		interval = 30 * time.Second
+	}
+
+	ticker := time.NewTicker(interval)
 	go func() {
 		for range ticker.C {
-			m.mu.Lock()
-			for secret, conn := range m.connections {
-				if err := conn.WriteMessage(websocket.PingMessage, nil); err != nil {
-					log.Printf("心跳发送失败，关闭连接 [%s]: %v", secret, err)
-					conn.Close()
-					delete(m.connections, secret)
-				}
+			m.mu.RLock()
+			// 复制连接列表以避免长时间持有读锁
+			type connInfo struct {
+				secret  string
+				conn    *websocket.Conn
+				writeMu *sync.Mutex
 			}
-			m.mu.Unlock()
+			var conns []connInfo
+			for secret, conn := range m.connections {
+				conns = append(conns, connInfo{
+					secret:  secret,
+					conn:    conn,
+					writeMu: m.writeMus[secret],
+				})
+			}
+			m.mu.RUnlock()
+
+			for _, ci := range conns {
+				go func(info connInfo) {
+					info.writeMu.Lock()
+					defer info.writeMu.Unlock()
+					
+					// 设置写入超时
+					info.conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
+					if err := info.conn.WriteMessage(websocket.PingMessage, nil); err != nil {
+						log.Printf("心跳发送失败，关闭连接 [%s]: %v", info.secret, err)
+						m.RemoveConnection(info.secret)
+					}
+				}(ci)
+			}
 		}
 	}()
 }

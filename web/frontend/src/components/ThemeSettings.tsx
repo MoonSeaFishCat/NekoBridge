@@ -2,22 +2,21 @@ import React, { useState, useEffect } from 'react';
 import {
   Card,
   Form,
-  Select,
-  Button,
   Space,
+  Button,
   Switch,
-  ColorPicker,
-  MessagePlugin,
+  Select,
   Alert,
+  ColorPicker,
 } from 'tdesign-react';
+import { useData } from '../contexts/DataContext';
+import { useToast } from '../hooks/useToast';
 import { useConfig } from '../hooks/useConfig';
 import { configValidator } from '../utils/configValidation';
 
-interface ThemeSettingsProps {
-  onRefresh: () => void;
-}
-
-const ThemeSettings: React.FC<ThemeSettingsProps> = ({ onRefresh }) => {
+const ThemeSettings: React.FC = () => {
+  const { refreshData } = useData();
+  const { success: showSuccess, error: showError } = useToast();
   const {
     config,
     loading,
@@ -44,16 +43,16 @@ const ThemeSettings: React.FC<ThemeSettingsProps> = ({ onRefresh }) => {
       const validationErrors = configValidator.validateUIConfig(values);
       if (Object.keys(validationErrors).length > 0) {
         const firstError = Object.values(validationErrors)[0];
-        MessagePlugin.error(`配置验证失败: ${firstError}`);
+        showError(`配置验证失败: ${firstError}`);
         return;
       }
       
       await updateUIConfig(values);
-      MessagePlugin.success('主题设置已保存');
-      onRefresh();
+      showSuccess('主题设置已保存');
+      refreshData();
     } catch (error) {
       console.error('保存主题设置失败:', error);
-      MessagePlugin.error('保存主题设置失败');
+      showError('保存主题设置失败');
     } finally {
       setSaving(false);
     }

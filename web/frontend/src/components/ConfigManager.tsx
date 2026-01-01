@@ -9,17 +9,17 @@ import {
   Alert,
   Select,
   InputNumber,
-  MessagePlugin,
 } from 'tdesign-react';
 import { SaveIcon, RefreshIcon } from 'tdesign-icons-react';
 import { useConfig } from '../hooks/useConfig';
 import { configValidator } from '../utils/configValidation';
 
-interface ConfigManagerProps {
-  onRefresh: () => void;
-}
+import { useData } from '../contexts/DataContext';
+import { useToast } from '../hooks/useToast';
 
-const ConfigManager: React.FC<ConfigManagerProps> = ({ onRefresh }) => {
+const ConfigManager: React.FC = () => {
+  const { refreshData } = useData();
+  const { success: showSuccess, error: showError, info: showInfo } = useToast();
   const {
     config,
     loading,
@@ -44,12 +44,12 @@ const ConfigManager: React.FC<ConfigManagerProps> = ({ onRefresh }) => {
   // 手动刷新配置（恢复默认设置）
   const handleRefresh = async () => {
     try {
-      MessagePlugin.info('正在恢复默认设置...');
+      showInfo('正在恢复默认设置...');
       await loadConfig();
-      MessagePlugin.success('已恢复默认设置');
+      showSuccess('已恢复默认设置');
     } catch (error) {
       console.error('恢复默认设置失败:', error);
-      MessagePlugin.error('恢复默认设置失败');
+      showError('恢复默认设置失败');
     }
   };
 
@@ -64,7 +64,7 @@ const ConfigManager: React.FC<ConfigManagerProps> = ({ onRefresh }) => {
       const validationErrors = await configValidator.validateAllConfig(values);
       if (Object.keys(validationErrors).length > 0) {
         const firstError = Object.values(validationErrors)[0];
-        MessagePlugin.error(`配置验证失败: ${firstError}`);
+        showError(`配置验证失败: ${firstError}`);
         return;
       }
       
@@ -90,12 +90,12 @@ const ConfigManager: React.FC<ConfigManagerProps> = ({ onRefresh }) => {
       // 并行执行所有更新
       await Promise.all(updatePromises);
       
-      MessagePlugin.success('系统配置保存成功');
-      onRefresh();
+      showSuccess('系统配置保存成功');
+      refreshData();
     } catch (error: any) {
       console.error('保存配置错误:', error);
       const errorMessage = error.message || '保存系统配置失败';
-      MessagePlugin.error(errorMessage);
+      showError(errorMessage);
     } finally {
       setSaving(false);
     }

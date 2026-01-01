@@ -13,13 +13,8 @@ import {
   DownloadIcon,
   RefreshIcon,
 } from 'tdesign-icons-react';
+import { useData } from '../contexts/DataContext';
 import type { LogEntry } from '../types';
-
-interface LogViewerProps {
-  logs: LogEntry[];
-  onRefresh: () => void;
-  loading: boolean;
-}
 
 interface TableCellProps {
   row: LogEntry;
@@ -28,20 +23,12 @@ interface TableCellProps {
   colIndex: number;
 }
 
-const LogViewer: React.FC<LogViewerProps> = ({ logs, onRefresh, loading }: LogViewerProps) => {
+const LogViewer: React.FC = () => {
+  const { logs, loading, refreshData } = useData();
   const [levelFilter, setLevelFilter] = useState<string>('');
   const [searchText, setSearchText] = useState('');
   const [dateRange, setDateRange] = useState<[Date, Date] | null>(null);
   const [filteredLogs, setFilteredLogs] = useState<LogEntry[]>(logs);
-
-  // 调试：监听 logs 变化
-  useEffect(() => {
-    console.log('LogViewer 收到 logs 数据:', logs);
-    if (logs.length > 0) {
-      console.log('第一条日志:', logs[0]);
-      console.log('日志时间戳类型:', typeof logs[0].timestamp);
-    }
-  }, [logs]);
 
   // 过滤日志
   useEffect(() => {
@@ -195,7 +182,7 @@ const LogViewer: React.FC<LogViewerProps> = ({ logs, onRefresh, loading }: LogVi
             <Button
               variant="outline"
               icon={<RefreshIcon />}
-              onClick={onRefresh}
+              onClick={refreshData}
               loading={loading}
             >
               刷新

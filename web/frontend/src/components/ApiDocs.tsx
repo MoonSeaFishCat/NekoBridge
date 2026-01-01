@@ -11,15 +11,17 @@ import {
   CopyIcon,
   CheckCircleIcon,
 } from 'tdesign-icons-react';
+import { useToast } from '../hooks/useToast';
 
 const ApiDocs: React.FC = () => {
   const [copiedEndpoint, setCopiedEndpoint] = React.useState<string | null>(null);
+  const { success } = useToast();
 
   // 复制到剪贴板
   const handleCopy = (text: string, endpoint: string) => {
     navigator.clipboard.writeText(text);
     setCopiedEndpoint(endpoint);
-    console.log('已复制到剪贴板');
+    success('复制成功', '已复制到剪贴板');
     setTimeout(() => setCopiedEndpoint(null), 2000);
   };
 

@@ -18,8 +18,12 @@ const WebConsoleGuard: React.FC<WebConsoleGuardProps> = ({ children }) => {
     try {
       setLoading(true);
       setError(null);
-      const status = await apiService.getWebConsoleStatus();
-      setEnabled(status.enabled);
+      const response = await apiService.getWebConsoleStatus();
+      if (response.success && response.data) {
+        setEnabled(response.data.enabled);
+      } else {
+        setEnabled(false);
+      }
     } catch (err) {
       console.error('检查Web控制台状态失败:', err);
       setError('无法连接到服务器');

@@ -11,7 +11,8 @@ import {
   Alert,
 } from 'tdesign-react';
 import { SettingIcon, WifiIcon } from 'tdesign-icons-react';
-import { MessagePlugin } from 'tdesign-react';
+import { useToast } from '../hooks/useToast';
+import { useData } from '../contexts/DataContext';
 import { useConfig } from '../hooks/useConfig';
 import { configValidator } from '../utils/configValidation';
 
@@ -19,6 +20,8 @@ const { Title } = Typography;
 const FormItem = Form.FormItem;
 
 export function WebSocketSettings() {
+  const { refreshData } = useData();
+  const { success: showSuccess, error: showError } = useToast();
   const {
     config,
     loading,
@@ -44,15 +47,16 @@ export function WebSocketSettings() {
       const validationErrors = configValidator.validateWebSocketConfig(values);
       if (Object.keys(validationErrors).length > 0) {
         const firstError = Object.values(validationErrors)[0];
-        MessagePlugin.error(`配置验证失败: ${firstError}`);
+        showError(`配置验证失败: ${firstError}`);
         return;
       }
       
       await updateWebSocketConfig(values);
-      MessagePlugin.success('WebSocket配置已保存');
+      showSuccess('WebSocket配置已保存');
+      refreshData();
     } catch (error) {
       console.error('保存WebSocket配置失败:', error);
-      MessagePlugin.error('保存WebSocket配置失败');
+      showError('保存WebSocket配置失败');
     } finally {
       setSaving(false);
     }

@@ -86,7 +86,10 @@ apiClient.interceptors.response.use(
   (error) => {
     if (error.response?.status === 401) {
       authManager.clearToken();
-      window.location.href = '/login';
+      // 改进：只在非登录页且非已经重定向的情况下跳转
+      if (!window.location.pathname.endsWith('/login')) {
+        window.location.href = '/login';
+      }
     }
     return Promise.reject(error);
   }
@@ -126,54 +129,56 @@ export class ApiService {
   }
 
   // 系统信息
-  async getHealth(): Promise<HealthResponse> {
-    const response = await apiClient.get<HealthResponse>('/health');
+  async getHealth(): Promise<ApiResponse<HealthResponse>> {
+    const response = await apiClient.get<ApiResponse<HealthResponse>>('/health');
     return response.data;
   }
 
-  async getApiInfo(): Promise<any> {
-    const response = await apiClient.get('/');
+  async getApiInfo(): Promise<ApiResponse<any>> {
+    const response = await apiClient.get<ApiResponse<any>>('/');
     return response.data;
   }
 
   // Web控制台状态
-  async getWebConsoleStatus(): Promise<{ enabled: boolean }> {
-    const response = await apiClient.get<{ enabled: boolean }>('/web-console/status');
+  async getWebConsoleStatus(): Promise<ApiResponse<{ enabled: boolean }>> {
+    const response = await apiClient.get<ApiResponse<{ enabled: boolean }>>('/web-console/status');
     return response.data;
   }
 
   // 日志管理
-  async getLogs(limit?: number, level?: string): Promise<{ logs: LogEntry[]; total: number }> {
+  async getLogs(limit?: number, level?: string): Promise<ApiResponse<{ logs: LogEntry[]; total: number }>> {
     const params = new URLSearchParams();
     if (limit) params.append('limit', limit.toString());
     if (level) params.append('level', level);
     
-    try {
-      const response = await apiClient.get<{ logs: LogEntry[]; total: number }>(`/logs?${params}`);
-      console.log('后端日志响应:', response.data);
-      return response.data;
-    } catch (error: any) {
-      console.error('getLogs 请求失败:', {
-        status: error.response?.status,
-        statusText: error.response?.statusText,
-        data: error.response?.data,
-        message: error.message,
-      });
-      throw error;
-    }
+    const response = await apiClient.get<ApiResponse<{ logs: LogEntry[]; total: number }>>(`/logs?${params}`);
+    return response.data;
   }
 
   // 连接管理
-  async getConnections(): Promise<{ connections: Connection[]; total: number }> {
-    const response = await apiClient.get<{ connections: any[]; total: number }>('/connections');
+  async getConnections(): Promise<ApiResponse<{ connections: Connection[]; total: number }>> {
+    const response = await apiClient.get<ApiResponse<{ connections: any[]; total: number }>>('/connections');
+    
+    // 如果请求失败，直接返回
+    if (!response.data.success || !response.data.data) {
+      return response.data as any;
+    }
+
     // 字段转换：下划线转驼峰
-    const connections = (response.data.connections || []).map((conn: any) => ({
+    const connections = (response.data.data.connections || []).map((conn: any) => ({
       ...conn,
       createdAt: conn.created_at,
       lastUsed: conn.last_used,
       connectedAt: conn.connected_at,
     }));
-    return { connections, total: response.data.total };
+
+    return {
+      ...response.data,
+      data: {
+        connections,
+        total: response.data.data.total
+      }
+    };
   }
 
   async kickConnection(secret: string): Promise<ApiResponse> {
@@ -182,8 +187,8 @@ export class ApiService {
   }
 
   // 密钥管理
-  async getSecrets(): Promise<{ secrets: Secret[] }> {
-    const response = await apiClient.get<{ secrets: Secret[] }>('/secrets');
+  async getSecrets(): Promise<ApiResponse<{ secrets: Secret[] }>> {
+    const response = await apiClient.get<ApiResponse<{ secrets: Secret[] }>>('/secrets');
     return response.data;
   }
 
@@ -212,8 +217,8 @@ export class ApiService {
     return response.data;
   }
 
-  async getBlockedSecrets(): Promise<{ blockedSecrets: string[]; bans: BanInfo[] }> {
-    const response = await apiClient.get<{ blockedSecrets: string[]; bans: BanInfo[] }>('/secrets/blocked');
+  async getBlockedSecrets(): Promise<ApiResponse<{ blockedSecrets: string[]; bans: BanInfo[] }>> {
+    const response = await apiClient.get<ApiResponse<{ blockedSecrets: string[]; bans: BanInfo[] }>>('/secrets/blocked');
     return response.data;
   }
 
@@ -227,21 +232,21 @@ export class ApiService {
     return response.data;
   }
 
-  async exportSecrets(): Promise<ExportData> {
-    const response = await apiClient.get<ExportData>('/secrets/export');
+  async exportSecrets(): Promise<ApiResponse<ExportData>> {
+    const response = await apiClient.get<ApiResponse<ExportData>>('/secrets/export');
     return response.data;
   }
 
-  async importSecrets(data: ImportData, overwriteExisting = false): Promise<{ success: boolean; result: ImportResult }> {
-    const response = await apiClient.post<{ success: boolean; result: ImportResult }>(
+  async importSecrets(data: ImportData, overwriteExisting = false): Promise<ApiResponse<ImportResult>> {
+    const response = await apiClient.post<ApiResponse<ImportResult>>(
       `/secrets/import?overwriteExisting=${overwriteExisting}`,
       data
     );
     return response.data;
   }
 
-  async getSecretStats(): Promise<{ success: boolean; stats: SecretStats }> {
-    const response = await apiClient.get<{ success: boolean; stats: SecretStats }>('/secrets/stats');
+  async getSecretStats(): Promise<ApiResponse<SecretStats>> {
+    const response = await apiClient.get<ApiResponse<SecretStats>>('/secrets/stats');
     return response.data;
   }
 

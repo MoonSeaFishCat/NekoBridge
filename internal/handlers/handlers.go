@@ -62,6 +62,32 @@ func NewHandlers(cfg *config.Config, wsManager *websocket.Manager, staticFS ...e
 	}
 }
 
+// Success 成功响应
+func (h *Handlers) Success(c *gin.Context, data interface{}, message ...string) {
+	msg := ""
+	if len(message) > 0 {
+		msg = message[0]
+	}
+	c.JSON(http.StatusOK, models.APIResponse{
+		Success: true,
+		Data:    data,
+		Message: msg,
+	})
+}
+
+// Error 错误响应
+func (h *Handlers) Error(c *gin.Context, status int, err string, message ...string) {
+	msg := ""
+	if len(message) > 0 {
+		msg = message[0]
+	}
+	c.JSON(status, models.APIResponse{
+		Success: false,
+		Error:   err,
+		Message: msg,
+	})
+}
+
 // Init 初始化路由
 func Init(r *gin.Engine, cfg *config.Config, wsManager *websocket.Manager, staticFS ...embed.FS) {
 	h := NewHandlers(cfg, wsManager, staticFS...)
@@ -222,10 +248,7 @@ func (h *Handlers) DomainMiddleware() gin.HandlerFunc {
 					"bound_domain": h.config.Server.Domain,
 					"path":         c.Request.URL.Path,
 				})
-				c.JSON(http.StatusForbidden, models.APIResponse{
-					Success: false,
-					Error:   "Access denied: domain mismatch",
-				})
+				h.Error(c, http.StatusForbidden, "Access denied: domain mismatch")
 				c.Abort()
 				return
 			}
@@ -239,10 +262,7 @@ func (h *Handlers) AuthMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		token := c.GetHeader("Authorization")
 		if token == "" {
-			c.JSON(http.StatusUnauthorized, models.APIResponse{
-				Success: false,
-				Error:   "Access token required",
-			})
+			h.Error(c, http.StatusUnauthorized, "Access token required")
 			c.Abort()
 			return
 		}
@@ -254,10 +274,7 @@ func (h *Handlers) AuthMiddleware() gin.HandlerFunc {
 
 		claims, err := h.jwtManager.ValidateToken(token)
 		if err != nil {
-			c.JSON(http.StatusForbidden, models.APIResponse{
-				Success: false,
-				Error:   "Invalid or expired token",
-			})
+			h.Error(c, http.StatusForbidden, "Invalid or expired token")
 			c.Abort()
 			return
 		}
@@ -269,7 +286,7 @@ func (h *Handlers) AuthMiddleware() gin.HandlerFunc {
 
 // APIInfo API信息
 func (h *Handlers) APIInfo(c *gin.Context) {
-	c.JSON(http.StatusOK, gin.H{
+	h.Success(c, gin.H{
 		"name":    "QQ Webhook Pro",
 		"msg":     "欢迎使用QQ机器人webhook服务",
 		"status":  "running",
@@ -290,7 +307,7 @@ func (h *Handlers) ProxyCheck(c *gin.Context) {
 		}
 	}
 
-	c.JSON(http.StatusOK, gin.H{
+	h.Success(c, gin.H{
 		"client_ip":       c.ClientIP(),
 		"remote_addr":     c.Request.RemoteAddr,
 		"host":            c.Request.Host,
@@ -343,7 +360,7 @@ func (h *Handlers) HealthCheck(c *gin.Context) {
 		LoadAverage: getLoadAverage(),
 	}
 
-	c.JSON(http.StatusOK, response)
+	h.Success(c, response)
 }
 
 // Login 登录
@@ -353,40 +370,28 @@ func (h *Handlers) Login(c *gin.Context) {
 		Password string `json:"password" binding:"required"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, models.LoginResponse{
-			Success: false,
-			Message: "用户名和密码不能为空",
-		})
+		h.Error(c, http.StatusBadRequest, "用户名和密码不能为空")
 		return
 	}
 
 	// 验证用户名和密码
-	// 首先检查用户名
 	if req.Username != h.config.Auth.Username {
 		h.logger.Log("warning", "用户登录失败", gin.H{"username": req.Username, "reason": "invalid_username"})
-		c.JSON(http.StatusUnauthorized, models.LoginResponse{
-			Success: false,
-			Message: "用户名或密码错误",
-		})
+		h.Error(c, http.StatusUnauthorized, "用户名或密码错误")
 		return
 	}
 
 	// 检查密码 - 支持明文和哈希密码
 	var passwordValid bool
-	// 如果配置中的密码以$2开头，说明是bcrypt哈希
 	if strings.HasPrefix(h.config.Auth.Password, "$2") {
 		passwordValid = utils.CheckPasswordHash(req.Password, h.config.Auth.Password)
 	} else {
-		// 兼容明文密码
 		passwordValid = req.Password == h.config.Auth.Password
 	}
 
 	if !passwordValid {
 		h.logger.Log("warning", "用户登录失败", gin.H{"username": req.Username, "reason": "invalid_password"})
-		c.JSON(http.StatusUnauthorized, models.LoginResponse{
-			Success: false,
-			Message: "用户名或密码错误",
-		})
+		h.Error(c, http.StatusUnauthorized, "用户名或密码错误")
 		return
 	}
 
@@ -394,16 +399,13 @@ func (h *Handlers) Login(c *gin.Context) {
 	token, err := h.jwtManager.GenerateToken(req.Username)
 	if err != nil {
 		h.logger.Log("error", "生成JWT令牌失败", err)
-		c.JSON(http.StatusInternalServerError, models.LoginResponse{
-			Success: false,
-			Message: "服务器错误",
-		})
+		h.Error(c, http.StatusInternalServerError, "服务器错误")
 		return
 	}
 
 	h.logger.Log("info", "用户登录成功", gin.H{"username": req.Username})
 
-	c.JSON(http.StatusOK, models.LoginResponse{
+	h.Success(c, models.LoginResponse{
 		Success: true,
 		Token:   token,
 		Message: "登录成功",
@@ -412,23 +414,25 @@ func (h *Handlers) Login(c *gin.Context) {
 
 // Logout 登出
 func (h *Handlers) Logout(c *gin.Context) {
-	user, _ := c.Get("user")
-	claims := user.(*utils.Claims)
+	user, exists := c.Get("user")
+	if exists {
+		claims := user.(*utils.Claims)
+		h.logger.Log("info", "用户登出", gin.H{"username": claims.Username})
+	}
 
-	h.logger.Log("info", "用户登出", gin.H{"username": claims.Username})
-
-	c.JSON(http.StatusOK, models.APIResponse{
-		Success: true,
-		Message: "登出成功",
-	})
+	h.Success(c, nil, "登出成功")
 }
 
 // VerifyToken 验证令牌
 func (h *Handlers) VerifyToken(c *gin.Context) {
-	user, _ := c.Get("user")
+	user, exists := c.Get("user")
+	if !exists {
+		h.Error(c, http.StatusUnauthorized, "未认证")
+		return
+	}
 	claims := user.(*utils.Claims)
 
-	c.JSON(http.StatusOK, gin.H{
+	h.Success(c, gin.H{
 		"valid": true,
 		"user":  claims,
 	})
@@ -462,21 +466,16 @@ func (h *Handlers) Webhook(c *gin.Context) {
 		payload = string(bodyBytes)
 	}
 
-	// 解析用于签名校验的特定结构 (QQ Webhook 模式)
+	// 尝试解析为签名校验请求
 	var req models.WebhookRequest
-	_ = json.Unmarshal(bodyBytes, &req)
-
-	// 处理签名验证请求
-	if req.D.EventTs != "" && req.D.PlainToken != "" {
+	if err := json.Unmarshal(bodyBytes, &req); err == nil && req.D.EventTs != "" && req.D.PlainToken != "" {
 		h.logger.Log("info", "收到签名校验请求", gin.H{"secret": secret, "payload": payload})
 
 		if h.config.Security.EnableSignatureValidation {
 			result, err := h.signer.GenerateSignature(secret, req.D.EventTs, req.D.PlainToken)
 			if err != nil {
 				h.logger.Log("error", "签名校验失败", gin.H{"secret": secret, "error": err, "payload": payload})
-				c.JSON(http.StatusBadRequest, models.APIResponse{
-					Error: "Signature validation failed",
-				})
+				h.Error(c, http.StatusBadRequest, "Signature validation failed")
 				return
 			}
 
@@ -484,37 +483,7 @@ func (h *Handlers) Webhook(c *gin.Context) {
 
 			// 自动添加密钥（如果启用）
 			if !h.config.Security.RequireManualKeyManagement {
-				// 检查密钥是否已存在于数据库
-				secretService := &database.SecretService{}
-				existingSecret, err := secretService.GetSecret(secret)
-				if err != nil || existingSecret == nil {
-					// 添加到数据库
-					secretRecord := &database.Secret{
-						Secret:         secret,
-						Name:           "",
-						Description:    "自动生成的密钥（签名验证通过）",
-						Enabled:        true,
-						MaxConnections: h.config.Security.MaxConnectionsPerSecret,
-						CreatedBy:      "system",
-					}
-
-					if err := secretService.CreateSecret(secretRecord); err != nil {
-						h.logger.Log("error", "自动添加密钥到数据库失败", gin.H{"secret": secret, "error": err.Error()})
-					} else {
-						h.logger.Log("info", "自动添加密钥到数据库成功", gin.H{"secret": secret})
-					}
-				}
-
-				// 添加到内存配置
-				h.config.AddSecret(secret, config.SecretConfig{
-					Description:    "自动生成的密钥（签名验证通过）",
-					Enabled:        true,
-					MaxConnections: h.config.Security.MaxConnectionsPerSecret,
-				})
-				h.logger.Log("info", "签名验证通过，自动添加新密钥", gin.H{"secret": secret})
-
-				// 广播密钥更新事件到管理界面
-				h.broadcastSecretUpdate("secret_added", secret)
+				h.autoAddSecret(secret, "自动生成的密钥（签名验证通过）")
 			}
 
 			h.config.MarkSecretUsed(secret)
@@ -525,37 +494,7 @@ func (h *Handlers) Webhook(c *gin.Context) {
 
 			// 如果启用自动模式且密钥不存在，自动添加
 			if !h.config.Security.RequireManualKeyManagement {
-				// 检查密钥是否已存在于数据库
-				secretService := &database.SecretService{}
-				existingSecret, err := secretService.GetSecret(secret)
-				if err != nil || existingSecret == nil {
-					// 添加到数据库
-					secretRecord := &database.Secret{
-						Secret:         secret,
-						Name:           "",
-						Description:    "自动生成的密钥（签名验证已禁用）",
-						Enabled:        true,
-						MaxConnections: h.config.Security.MaxConnectionsPerSecret,
-						CreatedBy:      "system",
-					}
-
-					if err := secretService.CreateSecret(secretRecord); err != nil {
-						h.logger.Log("error", "自动添加密钥到数据库失败", gin.H{"secret": secret, "error": err.Error()})
-					} else {
-						h.logger.Log("info", "自动添加密钥到数据库成功", gin.H{"secret": secret})
-					}
-				}
-
-				// 添加到内存配置
-				h.config.AddSecret(secret, config.SecretConfig{
-					Description:    "自动生成的密钥（签名验证已禁用）",
-					Enabled:        true,
-					MaxConnections: h.config.Security.MaxConnectionsPerSecret,
-				})
-				h.logger.Log("info", "签名验证已禁用，自动添加新密钥", gin.H{"secret": secret})
-
-				// 广播密钥更新事件到管理界面
-				h.broadcastSecretUpdate("secret_added", secret)
+				h.autoAddSecret(secret, "自动生成的密钥（签名验证已禁用）")
 			}
 
 			c.JSON(http.StatusOK, gin.H{
@@ -569,25 +508,57 @@ func (h *Handlers) Webhook(c *gin.Context) {
 	// 检查密钥是否被允许连接
 	if !h.config.IsSecretEnabled(secret) {
 		h.logger.Log("warning", "密钥被禁用或不存在", gin.H{"secret": secret})
-		c.JSON(http.StatusForbidden, models.APIResponse{
-			Error: "Secret disabled or not found",
-		})
+		h.Error(c, http.StatusForbidden, "Secret disabled or not found")
 		return
 	}
 
 	// 处理普通消息
 	h.logger.Log("info", "收到Webhook消息", gin.H{"secret": secret, "payload": payload})
 
-	// 发送到WebSocket连接 - 直接原样转发原始 Body 字节，不使用结构体包装
+	// 发送到WebSocket连接
 	if err := h.wsManager.SendTextMessage(secret, string(bodyBytes)); err != nil {
 		h.logger.Log("warning", "消息推送失败：未找到活跃连接", gin.H{"secret": secret})
-		c.JSON(http.StatusOK, gin.H{"status": "连接未就绪"})
+		h.Success(c, gin.H{"status": "连接未就绪"})
 		return
 	}
 
 	h.logger.Log("info", "消息推送成功", gin.H{"secret": secret, "payload": payload})
 	h.config.MarkSecretUsed(secret)
-	c.JSON(http.StatusOK, gin.H{"status": "推送成功"})
+	h.Success(c, gin.H{"status": "推送成功"})
+}
+
+// autoAddSecret 自动添加密钥
+func (h *Handlers) autoAddSecret(secret, description string) {
+	// 检查密钥是否已存在于数据库
+	secretService := &database.SecretService{}
+	existingSecret, err := secretService.GetSecret(secret)
+	if err != nil || existingSecret == nil {
+		// 添加到数据库
+		secretRecord := &database.Secret{
+			Secret:         secret,
+			Name:           "",
+			Description:    description,
+			Enabled:        true,
+			MaxConnections: h.config.Security.MaxConnectionsPerSecret,
+			CreatedBy:      "system",
+		}
+
+		if err := secretService.CreateSecret(secretRecord); err != nil {
+			h.logger.Log("error", "自动添加密钥到数据库失败", gin.H{"secret": secret, "error": err.Error()})
+		} else {
+			h.logger.Log("info", "自动添加密钥到数据库成功", gin.H{"secret": secret})
+		}
+	}
+
+	// 添加到内存配置
+	h.config.AddSecret(secret, config.SecretConfig{
+		Description:    description,
+		Enabled:        true,
+		MaxConnections: h.config.Security.MaxConnectionsPerSecret,
+	})
+
+	// 广播密钥更新事件到管理界面
+	h.broadcastSecretUpdate("secret_added", secret)
 }
 
 // broadcastSecretUpdate 广播密钥更新事件到管理界面
@@ -667,9 +638,19 @@ func (h *Handlers) WebSocketHandler(c *gin.Context) {
 	defer conn.Close()
 
 	// 设置读写超时
-	if h.config.WebSocket.ReadTimeout > 0 {
-		conn.SetReadDeadline(time.Now().Add(time.Duration(h.config.WebSocket.ReadTimeout) * time.Millisecond))
+	readTimeout := time.Duration(h.config.WebSocket.ReadTimeout) * time.Millisecond
+	if readTimeout <= 0 {
+		readTimeout = 60 * time.Second // 默认 60s
 	}
+
+	conn.SetReadDeadline(time.Now().Add(readTimeout))
+	
+	// 设置 Pong 处理器，收到 Pong 时重置读超时
+	conn.SetPongHandler(func(string) error {
+		conn.SetReadDeadline(time.Now().Add(readTimeout))
+		return nil
+	})
+
 	if h.config.WebSocket.WriteTimeout > 0 {
 		conn.SetWriteDeadline(time.Now().Add(time.Duration(h.config.WebSocket.WriteTimeout) * time.Millisecond))
 	}
@@ -688,6 +669,9 @@ func (h *Handlers) WebSocketHandler(c *gin.Context) {
 
 	// 处理WebSocket消息
 	for {
+		// 读取消息前重置读超时
+		conn.SetReadDeadline(time.Now().Add(readTimeout))
+		
 		// 读取消息类型
 		messageType, data, err := conn.ReadMessage()
 		if err != nil {
@@ -725,7 +709,8 @@ func (h *Handlers) WebSocketHandler(c *gin.Context) {
 					Data:   gin.H{"timestamp": time.Now().Unix()},
 					Format: models.MessageFormatJSON,
 				}
-				conn.WriteJSON(pongMsg)
+				// 使用管理器的方法发送，确保写锁安全
+				h.wsManager.SendMessage(secret, pongMsg)
 				h.logger.Log("debug", "回复客户端心跳", gin.H{"secret": secret})
 			}
 

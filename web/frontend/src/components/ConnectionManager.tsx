@@ -5,7 +5,6 @@ import {
   Button,
   Space,
   Tag,
-  Badge,
   Popconfirm,
 } from 'tdesign-react';
 import {
@@ -15,27 +14,26 @@ import {
   CheckCircleIcon,
 } from 'tdesign-icons-react';
 import { apiService } from '../services/api';
+import { useData } from '../contexts/DataContext';
+import { useToast } from '../hooks/useToast';
 import type { Connection } from '../types';
 
-interface ConnectionManagerProps {
-  connections: Connection[];
-  onRefresh: () => void;
-  loading: boolean;
-}
+const ConnectionManager: React.FC = () => {
+  const { connections, loading, refreshData } = useData();
+  const { success, error } = useToast();
 
-const ConnectionManager: React.FC<ConnectionManagerProps> = ({
-  connections,
-  onRefresh,
-  loading,
-}) => {
   // 踢出连接
   const handleKick = async (secret: string) => {
     try {
-      await apiService.kickConnection(secret);
-      console.log('连接已断开');
-      onRefresh();
-    } catch (error: any) {
-      console.error(error.response?.data?.message || '操作失败');
+      const response = await apiService.kickConnection(secret);
+      if (response.success) {
+        success('连接已断开', response.message || '操作成功');
+        refreshData();
+      } else {
+        error('踢出失败', response.error || '未知错误');
+      }
+    } catch (err: any) {
+      error('踢出失败', err.message || '网络错误');
     }
   };
 
@@ -43,15 +41,24 @@ const ConnectionManager: React.FC<ConnectionManagerProps> = ({
   const handleToggleBlock = async (connection: Connection) => {
     try {
       if (connection.enabled) {
-        await apiService.blockSecret(connection.secret);
-        console.log('已封禁');
+        const response = await apiService.blockSecret(connection.secret, '管理员手动封禁');
+        if (response.success) {
+          success('已封禁', response.message || '密钥已禁用');
+          refreshData();
+        } else {
+          error('封禁失败', response.error || '未知错误');
+        }
       } else {
-        await apiService.unblockSecret(connection.secret);
-        console.log('已解封');
+        const response = await apiService.unblockSecret(connection.secret);
+        if (response.success) {
+          success('已解封', response.message || '密钥已启用');
+          refreshData();
+        } else {
+          error('解封失败', response.error || '未知错误');
+        }
       }
-      onRefresh();
-    } catch (error: any) {
-      console.error('操作失败');
+    } catch (err: any) {
+      error('操作失败', err.message || '网络错误');
     }
   };
 
@@ -77,11 +84,13 @@ const ConnectionManager: React.FC<ConnectionManagerProps> = ({
       key: 'connected',
       width: 120,
       cell: (props: any) => (
-        <Badge
-          dot
-        >
-          {props.row.connected ? '已连接' : '未连接'}
-        </Badge>
+        <Space size="small">
+          {props.row.connected ? (
+            <Tag theme="success" variant="light" icon={<CheckCircleIcon />}>已连接</Tag>
+          ) : (
+            <Tag theme="default" variant="light">未连接</Tag>
+          )}
+        </Space>
       ),
     },
     {
@@ -101,7 +110,7 @@ const ConnectionManager: React.FC<ConnectionManagerProps> = ({
       title: '连接时间',
       key: 'connectedAt',
       width: 180,
-      cell: (props: any) => new Date(props.row.connectedAt).toLocaleString(),
+      cell: (props: any) => props.row.connectedAt ? new Date(props.row.connectedAt).toLocaleString() : '-',
     },
     {
       title: '最后使用',
@@ -151,7 +160,7 @@ const ConnectionManager: React.FC<ConnectionManagerProps> = ({
           <span>连接管理</span>
           <Button
             icon={<RefreshIcon />}
-            onClick={onRefresh}
+            onClick={refreshData}
             loading={loading}
           >
             刷新

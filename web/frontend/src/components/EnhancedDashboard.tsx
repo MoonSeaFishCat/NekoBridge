@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   Card,
   Button,
@@ -17,32 +18,17 @@ import {
   DesktopIcon,
   ErrorCircleIcon,
 } from 'tdesign-icons-react';
-import api from '../services/api';
-import type { LogEntry, Connection, DashboardStats } from '../types';
+import { apiService } from '../services/api';
+import { useData } from '../contexts/DataContext';
+import type { DashboardStats } from '../types';
 
 const { Text } = Typography;
 
-interface EnhancedDashboardProps {
-  logs: LogEntry[];
-  connections: Connection[];
-  blockedSecrets: string[];
-  isConnected: boolean;
-  onRefresh: () => void;
-  loading: boolean;
-  onNavigate?: (tab: string) => void;
-}
-
-export default function EnhancedDashboard({
-  logs,
-  connections,
-  blockedSecrets,
-  isConnected,
-  onRefresh,
-  loading,
-  onNavigate
-}: EnhancedDashboardProps) {
+export default function EnhancedDashboard() {
+  const { logs, connections, loading, refreshData } = useData();
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [statsLoading, setStatsLoading] = useState(false);
+  const navigate = useNavigate();
 
   useEffect(() => {
     loadStats();
@@ -51,8 +37,39 @@ export default function EnhancedDashboard({
   const loadStats = async () => {
     setStatsLoading(true);
     try {
-      const response = await api.getDashboardStats();
-      setStats(response);
+      const response = await apiService.getHealth();
+      // 这里需要根据实际后端返回的 health 接口调整数据映射
+      // 假设 apiService.getHealth() 返回的数据包含我们需要的信息
+      if (response.success && response.data) {
+        const health = response.data;
+        const memUsage = health.memory.heap_sys > 0 
+          ? (health.memory.heap_used / health.memory.heap_sys) * 100 
+          : 0;
+
+        setStats({
+          system: {
+            cpu: health.cpu.usage,
+            memory: memUsage,
+            uptime: health.uptime,
+            cpu_cores: health.cpu.cores,
+            cpu_model: health.cpu.model,
+            load_average: health.load_average
+          },
+          secrets: {
+            total: 0, // Will be updated by refreshData -> connections
+            blocked: 0
+          },
+          connections: {
+            active: health.connections,
+            total: health.connections
+          },
+          logs: {
+            total: logs.length,
+            error: logs.filter(l => l.level === 'error').length,
+            warnings: logs.filter(l => l.level === 'warning').length
+          }
+        });
+      }
     } catch (error) {
       console.error('Failed to load stats:', error);
     } finally {
@@ -96,6 +113,8 @@ export default function EnhancedDashboard({
   const warningLogs = logs.filter(log => log.level === 'warning').length;
   const totalLogs = logs.length;
 
+  const isConnected = true; // 暂时写死，后续可以从全局 WebSocket 状态获取
+
   return (
     <div className="animate-fade-in">
       {/* 系统状态卡片 */}
@@ -127,7 +146,7 @@ export default function EnhancedDashboard({
                 size="small"
                 variant="outline"
                 icon={<RefreshIcon />}
-                onClick={() => { onRefresh(); loadStats(); }}
+                onClick={() => { refreshData(); loadStats(); }}
                 loading={loading || statsLoading}
               >
                 刷新
@@ -188,7 +207,7 @@ export default function EnhancedDashboard({
               {stats?.secrets?.total || 0}
             </div>
             <Tag theme="danger" variant="light" size="small" style={{ width: 'fit-content' }}>
-              {blockedSecrets.length} 个被封禁
+              封禁管理
             </Tag>
           </Card>
 
@@ -310,7 +329,7 @@ export default function EnhancedDashboard({
             <Button 
               size="small" 
               variant="text"
-              onClick={() => onNavigate?.('logs')}
+              onClick={() => navigate('/logs')}
               style={{ color: 'var(--nb-primary)' }}
             >
               查看更多
@@ -366,13 +385,13 @@ export default function EnhancedDashboard({
       >
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '16px' }}>
           {[
-            { label: '连接管理', icon: <LinkIcon />, key: 'connections', color: 'var(--nb-primary)' },
-            { label: '密钥管理', icon: <LockOnIcon />, key: 'secrets', color: 'var(--nb-error)' },
-            { label: '日志查询', icon: <HistoryIcon />, key: 'logs', color: 'var(--nb-warning)' },
-            { label: '封禁列表', icon: <ErrorCircleIcon />, key: 'bans', color: 'var(--nb-info)' },
+            { label: '连接管理', icon: <LinkIcon />, path: '/connections', color: 'var(--nb-primary)' },
+            { label: '密钥管理', icon: <LockOnIcon />, path: '/secrets', color: 'var(--nb-error)' },
+            { label: '日志查询', icon: <HistoryIcon />, path: '/logs', color: 'var(--nb-warning)' },
+            { label: '封禁列表', icon: <ErrorCircleIcon />, path: '/bans', color: 'var(--nb-info)' },
           ].map((item) => (
             <Button 
-              key={item.key}
+              key={item.path}
               variant="outline" 
               className="card-hover"
               style={{ 
@@ -384,7 +403,7 @@ export default function EnhancedDashboard({
                 justifyContent: 'center',
                 gap: '8px'
               }}
-              onClick={() => onNavigate?.(item.key)}
+              onClick={() => navigate(item.path)}
             >
               <div style={{ color: item.color, display: 'flex' }}>{item.icon}</div>
               <span style={{ fontWeight: 500 }}>{item.label}</span>
