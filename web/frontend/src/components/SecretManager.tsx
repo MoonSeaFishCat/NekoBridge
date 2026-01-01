@@ -63,8 +63,8 @@ const SecretManager: React.FC = () => {
         apiService.getSecrets(),
         apiService.getSecretStats(),
       ]);
-      setSecrets(secretsData.secrets || []);
-      setStats(statsData.stats || stats);
+      setSecrets(secretsData.data?.secrets || []);
+      setStats(statsData.data?.stats || stats);
     } catch (error) {
       console.error('加载数据失败');
     } finally {
@@ -182,8 +182,13 @@ const SecretManager: React.FC = () => {
     try {
       const text = await file.text();
       const data = JSON.parse(text);
-      const result = await apiService.importSecrets(data);
-      showSuccess(`导入成功: ${result.result.imported} 个，跳过: ${result.result.skipped} 个`);
+      const response = await apiService.importSecrets(data);
+      const result = response.data?.result;
+      if (result) {
+        showSuccess(`导入成功: ${result.imported} 个，跳过: ${result.skipped} 个`);
+      } else {
+        showSuccess('导入完成');
+      }
       loadData();
       refreshData();
     } catch (error) {

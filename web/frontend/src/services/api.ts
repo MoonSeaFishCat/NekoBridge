@@ -237,16 +237,16 @@ export class ApiService {
     return response.data;
   }
 
-  async importSecrets(data: ImportData, overwriteExisting = false): Promise<ApiResponse<ImportResult>> {
-    const response = await apiClient.post<ApiResponse<ImportResult>>(
+  async importSecrets(data: ImportData, overwriteExisting = false): Promise<ApiResponse<{ result: ImportResult }>> {
+    const response = await apiClient.post<ApiResponse<{ result: ImportResult }>>(
       `/secrets/import?overwriteExisting=${overwriteExisting}`,
       data
     );
     return response.data;
   }
 
-  async getSecretStats(): Promise<ApiResponse<SecretStats>> {
-    const response = await apiClient.get<ApiResponse<SecretStats>>('/secrets/stats');
+  async getSecretStats(): Promise<ApiResponse<{ stats: SecretStats }>> {
+    const response = await apiClient.get<ApiResponse<{ stats: SecretStats }>>('/secrets/stats');
     return response.data;
   }
 
