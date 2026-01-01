@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Card,
@@ -20,61 +20,45 @@ import {
 } from 'tdesign-icons-react';
 import { apiService } from '../services/api';
 import { useData } from '../contexts/DataContext';
-import type { DashboardStats } from '../types';
+import type { DashboardStats, LogEntry } from '../types';
 
 const { Text } = Typography;
 
 export default function EnhancedDashboard() {
-  const { logs, connections, loading, refreshData } = useData();
+  const { refreshCounter } = useData();
   const [stats, setStats] = useState<DashboardStats | null>(null);
+  const [logs, setLogs] = useState<LogEntry[]>([]);
   const [statsLoading, setStatsLoading] = useState(false);
   const navigate = useNavigate();
 
-  useEffect(() => {
-    loadStats();
-  }, []);
-
-  const loadStats = async () => {
+  const loadStats = useCallback(async () => {
     setStatsLoading(true);
     try {
-      const response = await apiService.getHealth();
-      // 这里需要根据实际后端返回的 health 接口调整数据映射
-      // 假设 apiService.getHealth() 返回的数据包含我们需要的信息
-      if (response.success && response.data) {
-        const health = response.data;
-        const memUsage = health.memory.heap_sys > 0 
-          ? (health.memory.heap_used / health.memory.heap_sys) * 100 
-          : 0;
+      const [statsRes, logsRes] = await Promise.all([
+        apiService.getDashboardStats(),
+        apiService.getLogs(5, 0)
+      ]);
 
-        setStats({
-          system: {
-            cpu: health.cpu.usage,
-            memory: memUsage,
-            uptime: health.uptime,
-            cpu_cores: health.cpu.cores,
-            cpu_model: health.cpu.model,
-            load_average: health.load_average
-          },
-          secrets: {
-            total: 0, // Will be updated by refreshData -> connections
-            blocked: 0
-          },
-          connections: {
-            active: health.connections,
-            total: health.connections
-          },
-          logs: {
-            total: logs.length,
-            error: logs.filter(l => l.level === 'error').length,
-            warnings: logs.filter(l => l.level === 'warning').length
-          }
-        });
+      if (statsRes.success && statsRes.data) {
+        setStats(statsRes.data);
+      }
+      
+      if (logsRes.success && logsRes.data) {
+        setLogs(logsRes.data.logs || []);
       }
     } catch (error) {
       console.error('Failed to load stats:', error);
     } finally {
       setStatsLoading(false);
     }
+  }, []);
+
+  useEffect(() => {
+    loadStats();
+  }, [loadStats, refreshCounter]);
+
+  const refreshData = () => {
+    loadStats();
   };
 
   const formatUptime = (uptime: number) => {
@@ -103,16 +87,17 @@ export default function EnhancedDashboard() {
     return 'var(--nb-success)';
   };
 
-  // 计算活跃连接数
-  const activeConnections = connections.filter(c => c.connected).length;
-  const totalConnections = connections.length;
+  // 从 stats 中获取统计数据
+  const activeConnections = stats?.connections?.active || 0;
+  const totalConnections = stats?.connections?.total || 0;
   const connectionRate = totalConnections > 0 ? (activeConnections / totalConnections) * 100 : 0;
 
-  // 计算日志统计
-  const errorLogs = logs.filter(log => log.level === 'error').length;
-  const warningLogs = logs.filter(log => log.level === 'warning').length;
-  const totalLogs = logs.length;
+  // 获取日志统计
+  const errorLogs = stats?.logs?.error || 0;
+  const warningLogs = stats?.logs?.warnings || 0;
+  const totalLogs = stats?.logs?.total || 0;
 
+  const loading = statsLoading;
   const isConnected = true; // 暂时写死，后续可以从全局 WebSocket 状态获取
 
   return (

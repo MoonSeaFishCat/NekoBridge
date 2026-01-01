@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   Card,
   Table,
@@ -35,7 +35,7 @@ import { useData } from '../contexts/DataContext';
 import { useToast } from '../hooks/useToast';
 
 const SecretManager: React.FC = () => {
-  const { refreshData } = useData();
+  const { refreshCounter, refreshData } = useData();
   const { success: showSuccess, error: showError } = useToast();
   const [secrets, setSecrets] = useState<Secret[]>([]);
   const [stats, setStats] = useState<SecretStats>({
@@ -56,7 +56,7 @@ const SecretManager: React.FC = () => {
   const [batchForm] = Form.useForm();
 
   // 加载数据
-  const loadData = async () => {
+  const loadData = useCallback(async () => {
     try {
       setLoading(true);
       const [secretsData, statsData] = await Promise.all([
@@ -70,11 +70,11 @@ const SecretManager: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [stats]);
 
   useEffect(() => {
     loadData();
-  }, []);
+  }, [loadData, refreshCounter]);
 
   // 添加密钥
   const handleAdd = async (values: Secret) => {
@@ -203,25 +203,28 @@ const SecretManager: React.FC = () => {
       return;
     }
 
+    setLoading(true);
     try {
-      const promises = selectedSecrets.map(secret => {
+      for (const secret of selectedSecrets) {
         switch (values.operation) {
           case 'enable':
-            return apiService.updateSecret(secret, { enabled: true });
+            await apiService.updateSecret(secret, { enabled: true });
+            break;
           case 'disable':
-            return apiService.updateSecret(secret, { enabled: false });
+            await apiService.updateSecret(secret, { enabled: false });
+            break;
           case 'delete':
-            return apiService.deleteSecret(secret);
+            await apiService.deleteSecret(secret);
+            break;
           case 'block':
-            return apiService.blockSecret(secret);
+            await apiService.blockSecret(secret);
+            break;
           case 'unblock':
-            return apiService.unblockSecret(secret);
-          default:
-            return Promise.resolve();
+            await apiService.unblockSecret(secret);
+            break;
         }
-      });
+      }
 
-      await Promise.all(promises);
       const operationMap: Record<string, string> = {
         enable: '启用',
         disable: '禁用',
@@ -236,7 +239,11 @@ const SecretManager: React.FC = () => {
       loadData();
       refreshData();
     } catch (error) {
-      showError('批量操作失败');
+      showError('批量操作中途出错');
+      loadData();
+      refreshData();
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -468,7 +475,7 @@ const SecretManager: React.FC = () => {
       >
         <Form
           form={addForm}
-          onSubmit={(context) => handleAdd(context.fields as unknown as Secret)}
+          onSubmit={(context) => handleAdd(context.fields as Secret)}
           layout="vertical"
         >
           <Form.FormItem
@@ -532,7 +539,7 @@ const SecretManager: React.FC = () => {
         )}
         <Form
           form={editForm}
-          onSubmit={(context) => handleEdit(context.fields as unknown as Partial<Secret>)}
+          onSubmit={(context) => handleEdit(context.fields as Partial<Secret>)}
           layout="vertical"
         >
           <Form.FormItem
@@ -581,7 +588,7 @@ const SecretManager: React.FC = () => {
       >
         <Form
           form={batchForm}
-          onSubmit={(context) => handleBatchOperation(context.fields as unknown as { operation: string; enabled?: boolean })}
+          onSubmit={(context) => handleBatchOperation(context.fields as { operation: string; enabled?: boolean })}
           layout="vertical"
         >
           <Form.FormItem

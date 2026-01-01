@@ -154,9 +154,10 @@ export class ApiService {
   }
 
   // 日志管理
-  async getLogs(limit?: number, level?: string): Promise<ApiResponse<{ logs: LogEntry[]; total: number }>> {
+  async getLogs(limit?: number, offset?: number, level?: string): Promise<ApiResponse<{ logs: LogEntry[]; total: number }>> {
     const params = new URLSearchParams();
     if (limit) params.append('limit', limit.toString());
+    if (offset) params.append('offset', offset.toString());
     if (level) params.append('level', level);
     
     const response = await apiClient.get<ApiResponse<{ logs: LogEntry[]; total: number }>>(`/logs?${params}`);
@@ -164,8 +165,12 @@ export class ApiService {
   }
 
   // 连接管理
-  async getConnections(): Promise<ApiResponse<{ connections: Connection[]; total: number }>> {
-    const response = await apiClient.get<ApiResponse<{ connections: any[]; total: number }>>('/connections');
+  async getConnections(limit?: number, offset?: number): Promise<ApiResponse<{ connections: Connection[]; total: number }>> {
+    const params = new URLSearchParams();
+    if (limit) params.append('limit', limit.toString());
+    if (offset) params.append('offset', offset.toString());
+    
+    const response = await apiClient.get<ApiResponse<{ connections: any[]; total: number }>>(`/connections?${params}`);
     
     // 如果请求失败，直接返回
     if (!response.data.success || !response.data.data) {

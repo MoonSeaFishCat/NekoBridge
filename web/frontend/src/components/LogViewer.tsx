@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   Card,
   Table,
@@ -8,11 +8,13 @@ import {
   Input,
   Tag,
   DatePicker,
+  Dialog,
 } from 'tdesign-react';
 import {
   DownloadIcon,
   RefreshIcon,
 } from 'tdesign-icons-react';
+import { apiService } from '../services/api';
 import { useData } from '../contexts/DataContext';
 import type { LogEntry } from '../types';
 
@@ -24,30 +26,52 @@ interface TableCellProps {
 }
 
 const LogViewer: React.FC = () => {
-  const { logs, loading, refreshData } = useData();
-  const [levelFilter, setLevelFilter] = useState<string>('');
+  const { refreshCounter } = useData();
+  const [logs, setLogs] = useState<LogEntry[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [total, setTotal] = useState(0);
+  const [pageSize, setPageSize] = useState(20);
+  const [current, setCurrent] = useState(1);
+  const [levelFilter, setLevelFilter] = useState('');
   const [searchText, setSearchText] = useState('');
   const [dateRange, setDateRange] = useState<[Date, Date] | null>(null);
-  const [filteredLogs, setFilteredLogs] = useState<LogEntry[]>(logs);
+  const [selectedDetails, setSelectedDetails] = useState<any>(null);
+  const [detailsVisible, setDetailsVisible] = useState(false);
 
-  // 过滤日志
-  useEffect(() => {
-    let filtered = logs;
-
-    // 按级别过滤
-    if (levelFilter) {
-      filtered = filtered.filter((log: LogEntry) => log.level === levelFilter);
+  // 获取数据
+  const fetchData = useCallback(async () => {
+    try {
+      setLoading(true);
+      const offset = (current - 1) * pageSize;
+      const response = await apiService.getLogs(pageSize, offset, levelFilter);
+      if (response.success && response.data) {
+        setLogs(response.data.logs || []);
+        setTotal(response.data.total || 0);
+      }
+    } catch (error) {
+      console.error('Failed to fetch logs:', error);
+    } finally {
+      setLoading(false);
     }
+  }, [current, pageSize, levelFilter]);
 
-    // 按文本搜索
+  useEffect(() => {
+    fetchData();
+  }, [fetchData, refreshCounter]);
+
+  // 过滤日志（仅对当前页进行搜索过滤，或者我们可以选择让后端支持搜索）
+  // 目前后端仅支持级别过滤，前端支持搜索过滤
+  const filteredLogs = React.useMemo(() => {
+    if (!searchText && !dateRange) return logs;
+    
+    let filtered = [...logs];
     if (searchText) {
+      const lowerSearch = searchText.toLowerCase();
       filtered = filtered.filter((log: LogEntry) => 
-        log.message.toLowerCase().includes(searchText.toLowerCase()) ||
-        log.details?.toString().toLowerCase().includes(searchText.toLowerCase())
+        log.message.toLowerCase().includes(lowerSearch) ||
+        (log.details && JSON.stringify(log.details).toLowerCase().includes(lowerSearch))
       );
     }
-
-    // 按日期范围过滤
     if (dateRange) {
       const [start, end] = dateRange;
       filtered = filtered.filter((log: LogEntry) => {
@@ -55,37 +79,44 @@ const LogViewer: React.FC = () => {
         return logDate >= start && logDate <= end;
       });
     }
-
-    setFilteredLogs(filtered);
-  }, [logs, levelFilter, searchText, dateRange]);
+    return filtered;
+  }, [logs, searchText, dateRange]);
 
   // 导出日志
   const handleExport = async () => {
     try {
-      const data = filteredLogs.map((log: LogEntry) => ({
-        时间: new Date(log.timestamp).toLocaleString(),
-        级别: log.level,
-        消息: log.message,
-        详情: log.details ? JSON.stringify(log.details) : '',
-      }));
+      setLoading(true);
+      // 导出时获取更多日志
+      const response = await apiService.getLogs(1000, 0, levelFilter);
+      if (response.success && response.data) {
+        const exportData = response.data.logs.map((log: LogEntry) => ({
+          timestamp: new Date(log.timestamp).toLocaleString(),
+          level: log.level,
+          message: log.message,
+          details: log.details ? JSON.stringify(log.details) : ''
+        }));
 
-      const csv = [
-        '时间,级别,消息,详情',
-        ...data.map((row: any) => 
-          `"${row.时间}","${row.级别}","${row.消息}","${row.详情}"`
-        )
-      ].join('\n');
-
-      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-      const link = document.createElement('a');
-      link.href = URL.createObjectURL(blob);
-      link.download = `logs-${new Date().toISOString().split('T')[0]}.csv`;
-      link.click();
-      
-      console.log('导出成功');
+        const csvContent = "data:text/csv;charset=utf-8,"
+          + "Time,Level,Message,Details\n"
+          + exportData.map((e: any) => `"${e.timestamp}","${e.level}","${e.message.replace(/"/g, '""')}","${e.details.replace(/"/g, '""')}"`).join("\n");
+        
+        const encodedUri = encodeURI(csvContent);
+        const link = document.createElement("a");
+        link.setAttribute("href", encodedUri);
+        link.setAttribute("download", `logs_${new Date().getTime()}.csv`);
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+      }
     } catch (error) {
-      console.error('导出失败');
+      console.error('Export failed:', error);
+    } finally {
+      setLoading(false);
     }
+  };
+
+  const refreshData = () => {
+    fetchData();
   };
 
   // 获取日志级别颜色
@@ -139,23 +170,19 @@ const LogViewer: React.FC = () => {
     {
       title: '详情',
       key: 'details',
+      width: 120,
       cell: (props: TableCellProps) => props.row.details ? (
-        <pre style={{ 
-          margin: 0,
-          padding: '12px',
-          backgroundColor: 'var(--nb-bg-layout)',
-          border: '1px solid var(--nb-border-color)',
-          borderRadius: '8px',
-          fontSize: '11px',
-          maxHeight: '150px',
-          overflow: 'auto',
-          whiteSpace: 'pre-wrap',
-          wordBreak: 'break-all',
-          color: 'var(--nb-text-secondary)',
-          fontFamily: 'monospace'
-        }}>
-          {JSON.stringify(props.row.details, null, 2)}
-        </pre>
+        <Button
+          variant="text"
+          theme="primary"
+          size="small"
+          onClick={() => {
+            setSelectedDetails(props.row.details);
+            setDetailsVisible(true);
+          }}
+        >
+          查看详情
+        </Button>
       ) : <span style={{ color: 'var(--nb-text-secondary)' }}>-</span>,
     },
   ];
@@ -198,6 +225,30 @@ const LogViewer: React.FC = () => {
         </div>
       }
     >
+      <Dialog
+        header="日志详情"
+        visible={detailsVisible}
+        onClose={() => setDetailsVisible(false)}
+        footer={null}
+        width="600px"
+      >
+        <pre style={{ 
+          margin: 0,
+          padding: '16px',
+          backgroundColor: 'var(--nb-bg-layout)',
+          border: '1px solid var(--nb-border-color)',
+          borderRadius: '8px',
+          fontSize: '12px',
+          maxHeight: '400px',
+          overflow: 'auto',
+          whiteSpace: 'pre-wrap',
+          wordBreak: 'break-all',
+          color: 'var(--nb-text-main)',
+          fontFamily: 'monospace'
+        }}>
+          {selectedDetails ? JSON.stringify(selectedDetails, null, 2) : ''}
+        </pre>
+      </Dialog>
       {/* 过滤器 */}
       <div style={{ 
         marginBottom: '20px', 
@@ -268,8 +319,14 @@ const LogViewer: React.FC = () => {
         rowKey="id"
         verticalAlign="top"
         pagination={{
-          pageSize: 20,
-          showPageSize: false,
+          current,
+          pageSize,
+          total,
+          showPageSize: true,
+          onChange: (pageInfo) => {
+            setCurrent(pageInfo.current);
+            setPageSize(pageInfo.pageSize);
+          },
         }}
         empty={<div style={{ padding: '40px', textAlign: 'center', color: 'var(--nb-text-secondary)' }}>暂无匹配的日志记录</div>}
         style={{ borderRadius: '8px', overflow: 'hidden' }}

@@ -46,17 +46,17 @@ func (l *Logger) Log(level, message string, details interface{}) {
 	}
 
 	l.mu.Lock()
-	defer l.mu.Unlock()
-
 	// 添加日志条目
 	l.logs = append(l.logs, entry)
 
 	// 保持日志数量在限制内
-	if len(l.logs) > l.maxSize {
-		l.logs = l.logs[1:]
+	// 优化：只有当超过限制的 10% 时才进行修剪，减少切片重分配频率
+	if len(l.logs) > l.maxSize+l.maxSize/10 {
+		l.logs = l.logs[len(l.logs)-l.maxSize:]
 	}
+	l.mu.Unlock()
 
-	// 输出到控制台
+	// 输出到控制台（在锁外执行）
 	l.printToConsole(entry)
 }
 
@@ -95,35 +95,51 @@ func (l *Logger) printToConsole(entry models.LogEntry) {
 }
 
 // GetLogs 获取日志
-func (l *Logger) GetLogs(limit int, level string) []models.LogEntry {
+func (l *Logger) GetLogs(limit, offset int, level string) []models.LogEntry {
 	l.mu.RLock()
-	defer l.mu.RUnlock()
-
-	logs := l.logs
+	// 先获取当前日志的副本引用，尽快释放读锁
+	allLogs := l.logs
+	l.mu.RUnlock()
 
 	// 按级别过滤
+	var filtered []models.LogEntry
 	if level != "" {
-		filtered := make([]models.LogEntry, 0)
-		for _, log := range logs {
-			if log.Level == level {
-				filtered = append(filtered, log)
+		filtered = make([]models.LogEntry, 0)
+		skip := offset
+		for i := len(allLogs) - 1; i >= 0; i-- {
+			if allLogs[i].Level == level {
+				if skip > 0 {
+					skip--
+					continue
+				}
+				filtered = append(filtered, allLogs[i])
+				if limit > 0 && len(filtered) >= limit {
+					break
+				}
 			}
 		}
-		logs = filtered
+		return filtered
 	}
 
-	// 限制数量
-	if limit > 0 && len(logs) > limit {
-		logs = logs[len(logs)-limit:]
+	// 如果没有级别过滤
+	count := len(allLogs)
+	start := count - 1 - offset
+	if start < 0 {
+		return []models.LogEntry{}
 	}
 
-	// 反转顺序，最新的在前
-	reversed := make([]models.LogEntry, len(logs))
-	for i, log := range logs {
-		reversed[len(logs)-1-i] = log
+	end := start - limit + 1
+	if end < 0 {
+		end = 0
 	}
 
-	return reversed
+	actualCount := start - end + 1
+	result := make([]models.LogEntry, actualCount)
+	for i := 0; i < actualCount; i++ {
+		result[i] = allLogs[start-i]
+	}
+
+	return result
 }
 
 // GetLogCount 获取日志数量

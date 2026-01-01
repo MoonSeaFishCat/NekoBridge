@@ -218,23 +218,57 @@ func (m *Manager) GetConnection(secret string) (*websocket.Conn, bool) {
 }
 
 // GetConnections 获取所有连接信息
-func (m *Manager) GetConnections() []models.Connection {
+func (m *Manager) GetConnections(limit, offset int) ([]models.Connection, int) {
+	// 先获取所有连接的快照，尽量减少锁持有时间
 	m.mu.RLock()
-	defer m.mu.RUnlock()
-
-	connections := make([]models.Connection, 0, len(m.connections))
+	total := len(m.connections)
 	
-	// 预先获取所有密钥配置，避免在循环中重复加锁
+	// 如果没有连接，直接返回
+	if total == 0 {
+		m.mu.RUnlock()
+		return []models.Connection{}, 0
+	}
+
+	// 提取所有密钥并进行分页处理
+	secrets := make([]string, 0, total)
+	for secret := range m.connections {
+		secrets = append(secrets, secret)
+	}
+	m.mu.RUnlock()
+
+	// 简单的分页逻辑
+	start := offset
+	if start >= total {
+		return []models.Connection{}, total
+	}
+	
+	end := start + limit
+	if end > total {
+		end = total
+	}
+
+	pagedSecrets := secrets[start:end]
+
+	// 获取配置快照（在管理器锁之外获取配置锁）
 	var secretConfigs map[string]config.SecretConfig
 	if m.config != nil {
 		secretConfigs = m.config.GetSecrets()
 	}
-	
-	for secret, conn := range m.connections {
+
+	connections := make([]models.Connection, 0, len(pagedSecrets))
+	now := time.Now()
+
+	m.mu.RLock()
+	for _, secret := range pagedSecrets {
+		conn, exists := m.connections[secret]
+		if !exists {
+			continue
+		}
+		
 		connection := models.Connection{
 			Secret:      secret,
 			Connected:   conn != nil,
-			ConnectedAt: time.Now(),
+			ConnectedAt: now,
 		}
 
 		// 从预加载的配置中获取更多信息
@@ -247,8 +281,9 @@ func (m *Manager) GetConnections() []models.Connection {
 
 		connections = append(connections, connection)
 	}
+	m.mu.RUnlock()
 
-	return connections
+	return connections, total
 }
 
 // BroadcastBinary 广播二进制消息到所有连接

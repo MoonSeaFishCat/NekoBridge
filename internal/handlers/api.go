@@ -19,6 +19,7 @@ import (
 // GetLogs 获取日志
 func (h *Handlers) GetLogs(c *gin.Context) {
 	limitStr := c.DefaultQuery("limit", "100")
+	offsetStr := c.DefaultQuery("offset", "0")
 	level := c.Query("level")
 
 	limit, err := strconv.Atoi(limitStr)
@@ -26,7 +27,12 @@ func (h *Handlers) GetLogs(c *gin.Context) {
 		limit = 100
 	}
 
-	logs := h.logger.GetLogs(limit, level)
+	offset, err := strconv.Atoi(offsetStr)
+	if err != nil {
+		offset = 0
+	}
+
+	logs := h.logger.GetLogs(limit, offset, level)
 
 	h.Success(c, gin.H{
 		"logs":  logs,
@@ -36,11 +42,24 @@ func (h *Handlers) GetLogs(c *gin.Context) {
 
 // GetConnections 获取连接
 func (h *Handlers) GetConnections(c *gin.Context) {
-	connections := h.wsManager.GetConnections()
+	limitStr := c.DefaultQuery("limit", "100")
+	offsetStr := c.DefaultQuery("offset", "0")
+
+	limit, err := strconv.Atoi(limitStr)
+	if err != nil {
+		limit = 100
+	}
+
+	offset, err := strconv.Atoi(offsetStr)
+	if err != nil {
+		offset = 0
+	}
+
+	connections, total := h.wsManager.GetConnections(limit, offset)
 
 	h.Success(c, gin.H{
 		"connections": connections,
-		"total":       len(connections),
+		"total":       total,
 	})
 }
 

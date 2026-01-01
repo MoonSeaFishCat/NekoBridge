@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import {
   Card,
   Table,
@@ -54,7 +54,7 @@ interface BanStats {
 }
 
 function BanManager() {
-  const { refreshData } = useData();
+  const { refreshCounter, refreshData } = useData();
   const { success: showSuccess, error: showError } = useToast();
   const [loading, setLoading] = useState(false);
   const [bans, setBans] = useState<BanInfo[]>([]);
@@ -75,11 +75,7 @@ function BanManager() {
   const [editForm] = Form.useForm();
   const [batchForm] = Form.useForm();
 
-  useEffect(() => {
-    loadBans();
-  }, []);
-
-  const loadBans = async () => {
+  const loadBans = useCallback(async () => {
     setLoading(true);
     try {
       const response = await api.getBlockedSecrets();
@@ -100,12 +96,15 @@ function BanManager() {
       };
       setStats(stats);
     } catch (error) {
-      console.error('Failed to load bans:', error);
-      showError('加载封禁列表失败: ' + ((error as any)?.message || '未知错误'));
+      showError('加载封禁列表失败');
     } finally {
       setLoading(false);
     }
-  };
+  }, [showError]);
+
+  useEffect(() => {
+    loadBans();
+  }, [loadBans, refreshCounter]);
 
   const handleUnblock = async (secret: string) => {
     try {
@@ -164,28 +163,31 @@ function BanManager() {
       return;
     }
 
+    setLoading(true);
     try {
-      const promises = selectedBans.map(id => {
-        switch (values.operation) {
-          case 'unblock':
-            const ban = bans.find(b => b.id === id);
-            return ban ? api.unblockSecret(ban.secret) : Promise.resolve();
-          case 'delete':
-            return handleDelete(id);
-          default:
-            return Promise.resolve();
+      for (const id of selectedBans) {
+        if (values.operation === 'unblock') {
+          const ban = bans.find(b => b.id === id);
+          if (ban) {
+            await api.unblockSecret(ban.secret);
+          }
+        } else if (values.operation === 'delete') {
+          await api.deleteBanRecord(id);
         }
-      });
+      }
 
-      await Promise.all(promises);
-      showSuccess(`批量${values.operation}操作完成`);
+      showSuccess(`批量操作完成`);
       setBatchModalVisible(false);
       setSelectedBans([]);
       batchForm.reset();
       loadBans();
       refreshData();
     } catch (error) {
-      showError('批量操作失败');
+      showError('批量操作中途出错');
+      loadBans();
+      refreshData();
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -493,7 +495,7 @@ function BanManager() {
         )}
         <Form
           form={editForm}
-          onSubmit={(context) => handleEdit(context.fields as unknown as { reason?: string })}
+          onSubmit={(context) => handleEdit(context.fields as { reason?: string })}
           layout="vertical"
         >
           <FormItem
@@ -527,7 +529,7 @@ function BanManager() {
       >
         <Form
           form={batchForm}
-          onSubmit={(context) => handleBatchOperation(context as unknown as { operation: string })}
+          onSubmit={(context) => handleBatchOperation(context.fields as { operation: string })}
           layout="vertical"
         >
           <FormItem

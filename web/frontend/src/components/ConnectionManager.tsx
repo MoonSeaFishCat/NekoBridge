@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   Card,
   Table,
@@ -14,13 +14,42 @@ import {
   CheckCircleIcon,
 } from 'tdesign-icons-react';
 import { apiService } from '../services/api';
-import { useData } from '../contexts/DataContext';
 import { useToast } from '../hooks/useToast';
+import { useData } from '../contexts/DataContext';
 import type { Connection } from '../types';
 
 const ConnectionManager: React.FC = () => {
-  const { connections, loading, refreshData } = useData();
+  const { refreshCounter } = useData();
+  const [connections, setConnections] = useState<Connection[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [total, setTotal] = useState(0);
+  const [pageSize, setPageSize] = useState(10);
+  const [current, setCurrent] = useState(1);
   const { success, error } = useToast();
+
+  const fetchData = useCallback(async () => {
+    try {
+      setLoading(true);
+      const offset = (current - 1) * pageSize;
+      const response = await apiService.getConnections(pageSize, offset);
+      if (response.success && response.data) {
+        setConnections(response.data.connections || []);
+        setTotal(response.data.total || 0);
+      }
+    } catch (err: any) {
+      error('加载失败', err.message || '网络错误');
+    } finally {
+      setLoading(false);
+    }
+  }, [current, pageSize, error]);
+
+  useEffect(() => {
+    fetchData();
+  }, [fetchData, refreshCounter]);
+
+  const refreshData = () => {
+    fetchData();
+  };
 
   // 踢出连接
   const handleKick = async (secret: string) => {
@@ -174,7 +203,14 @@ const ConnectionManager: React.FC = () => {
         loading={loading}
         rowKey="secret"
         pagination={{
-          pageSize: 10,
+          current,
+          pageSize,
+          total,
+          showPageSize: true,
+          onChange: (pageInfo) => {
+            setCurrent(pageInfo.current);
+            setPageSize(pageInfo.pageSize);
+          },
         }}
         empty="暂无连接"
       />
